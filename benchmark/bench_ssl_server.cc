@@ -30,8 +30,8 @@ void signalHandler(int) {
     g_running = false;
 }
 
-Coroutine handleClient(IOScheduler* scheduler, SslContext* ctx, GHandle handle) {
-    SslSocket client(scheduler, ctx, handle);
+Coroutine handleClient(SslContext* ctx, GHandle handle) {
+    SslSocket client(ctx, handle);
     client.option().handleNonBlock();
 
     // SSL 握手 - 需要循环直到完成（SSL 握手是多轮的）
@@ -80,10 +80,9 @@ Coroutine handleClient(IOScheduler* scheduler, SslContext* ctx, GHandle handle) 
 }
 
 Coroutine sslServer(IOScheduler* scheduler, SslContext* ctx, uint16_t port) {
-    SslSocket listener(scheduler, ctx);
+    SslSocket listener(ctx);
 
-    auto createResult = listener.create(IPType::IPV4);
-    if (!createResult) {
+    if (!listener.isValid()) {
         std::cerr << "Failed to create socket" << std::endl;
         co_return;
     }
@@ -109,7 +108,7 @@ Coroutine sslServer(IOScheduler* scheduler, SslContext* ctx, uint16_t port) {
         Host clientHost;
         auto acceptResult = co_await listener.accept(&clientHost);
         if (acceptResult) {
-            scheduler->spawn(handleClient(scheduler, ctx, acceptResult.value()));
+            scheduler->spawn(handleClient(ctx, acceptResult.value()));
         }
     }
 

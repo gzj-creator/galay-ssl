@@ -1,0 +1,99 @@
+# 收集源文件
+file(GLOB_RECURSE SOURCES
+    "*/*.cc"
+)
+
+# 收集头文件
+file(GLOB_RECURSE HEADERS
+    "*/*.h"
+    "*/*.hpp"
+)
+
+# 创建库目标
+add_library(galay-ssl ${SOURCES} ${HEADERS})
+
+# 设置包含目录
+target_include_directories(galay-ssl
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+        $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}>
+        $<INSTALL_INTERFACE:include/galay-ssl>
+)
+
+# 包含 galay-kernel 头文件路径（优先使用源码目录，以便获取最新修改）
+target_include_directories(galay-ssl PUBLIC
+    /Users/gongzhijie/Desktop/projects/git/galay-kernel
+    /usr/local/include
+)
+
+# 链接 galay-kernel（使用本地编译的库）
+target_link_libraries(galay-ssl PUBLIC
+    galay-kernel-dev
+    OpenSSL::SSL OpenSSL::Crypto
+)
+
+# 链接 spdlog
+if(ENABLE_LOG)
+    target_link_libraries(galay-ssl PUBLIC spdlog::spdlog)
+endif()
+
+# 设置库的编译选项
+target_compile_options(galay-ssl PRIVATE
+    $<$<CXX_COMPILER_ID:GNU>:-Wall -Wextra -Wpedantic>
+    $<$<CXX_COMPILER_ID:Clang>:-Wall -Wextra -Wpedantic>
+    $<$<CXX_COMPILER_ID:MSVC>:/W4>
+)
+
+# 设置库的属性
+set_target_properties(galay-ssl PROPERTIES
+    VERSION ${PROJECT_VERSION}
+    SOVERSION ${PROJECT_VERSION_MAJOR}
+    OUTPUT_NAME galay-ssl
+)
+
+# 安装库文件
+install(TARGETS galay-ssl
+    EXPORT galay-ssl-targets
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
+    RUNTIME DESTINATION bin
+    INCLUDES DESTINATION include
+)
+
+# 安装头文件
+install(FILES ${HEADERS}
+    DESTINATION include/galay-ssl
+)
+
+# 安装配置文件
+include(CMakePackageConfigHelpers)
+
+# 生成版本文件
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/galay-ssl-config-version.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+# 生成配置文件
+configure_package_config_file(
+    "${CMAKE_SOURCE_DIR}/galay-ssl-config.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/galay-ssl-config.cmake"
+    INSTALL_DESTINATION lib/cmake/galay-ssl
+    PATH_VARS
+        CMAKE_INSTALL_PREFIX
+)
+
+# 安装配置文件
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/galay-ssl-config.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/galay-ssl-config-version.cmake"
+    DESTINATION lib/cmake/galay-ssl
+)
+
+# 安装导出目标
+install(EXPORT galay-ssl-targets
+    FILE galay-ssl-targets.cmake
+    NAMESPACE galay-ssl::
+    DESTINATION lib/cmake/galay-ssl
+)

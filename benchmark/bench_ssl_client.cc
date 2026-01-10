@@ -35,13 +35,12 @@ void signalHandler(int) {
     g_running = false;
 }
 
-Coroutine sslClient(IOScheduler* scheduler, SslContext* ctx,
+Coroutine sslClient(SslContext* ctx,
                     const std::string& host, uint16_t port,
                     const std::string& message, int requestCount) {
-    SslSocket socket(scheduler, ctx);
+    SslSocket socket(ctx);
 
-    auto createResult = socket.create(IPType::IPV4);
-    if (!createResult) {
+    if (!socket.isValid()) {
         g_errors++;
         g_connections_done++;
         co_return;
@@ -150,7 +149,7 @@ int main(int argc, char* argv[]) {
 
     // 启动客户端连接
     for (int i = 0; i < connections; i++) {
-        scheduler.spawn(sslClient(&scheduler, &ctx, host, port, message, requestsPerConn));
+        scheduler.spawn(sslClient(&ctx, host, port, message, requestsPerConn));
     }
 
     // 等待完成
