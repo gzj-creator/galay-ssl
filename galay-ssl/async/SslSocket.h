@@ -1,7 +1,6 @@
 #ifndef GALAY_SSL_SOCKET_H
 #define GALAY_SSL_SOCKET_H
 
-#include "galay-ssl/common/Defn.hpp"
 #include "galay-ssl/common/Error.h"
 #include "galay-ssl/ssl/SslContext.h"
 #include "galay-ssl/ssl/SslEngine.h"

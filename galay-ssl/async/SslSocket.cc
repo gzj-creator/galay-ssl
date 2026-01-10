@@ -82,7 +82,7 @@ std::expected<void, SslError> SslSocket::setHostname(const std::string& hostname
 void SslSocket::initEngine()
 {
     if (m_controller.m_handle.fd >= 0 && m_engine.isValid()) {
-        m_engine.setFd(m_controller.m_handle.fd);
+        (void)m_engine.setFd(m_controller.m_handle.fd);
         if (m_isServer) {
             m_engine.setAcceptState();
         } else {
@@ -112,7 +112,7 @@ SslHandshakeAwaitable SslSocket::handshake()
         initEngine();
     } else if (m_controller.m_handle.fd >= 0) {
         // 确保 fd 已设置
-        m_engine.setFd(m_controller.m_handle.fd);
+        (void)m_engine.setFd(m_controller.m_handle.fd);
     }
 
     return SslHandshakeAwaitable(&m_controller, &m_engine);
