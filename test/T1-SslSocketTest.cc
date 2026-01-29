@@ -294,7 +294,7 @@ TEST(SslError_PrivateKeyLoadFailed) {
 
 // ==================== 主函数 ====================
 
-int main(int argc, char** argv) {
+int main(int /*argc*/, char** /*argv*/) {
     std::cout << "\n========================================" << std::endl;
     std::cout << "  galay-ssl Unit Tests" << std::endl;
     std::cout << "========================================\n" << std::endl;
