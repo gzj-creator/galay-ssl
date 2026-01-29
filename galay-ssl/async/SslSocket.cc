@@ -12,6 +12,7 @@ SslSocket::SslSocket(SslContext* ctx, IPType type)
     , m_ctx(ctx)
     , m_engine(ctx)
     , m_isServer(false)
+    , m_engineInitialized(false)
 {
     int domain = (type == IPType::IPV4) ? AF_INET : AF_INET6;
     int fd = ::socket(domain, SOCK_STREAM, 0);
@@ -25,6 +26,7 @@ SslSocket::SslSocket(SslContext* ctx, GHandle handle)
     , m_ctx(ctx)
     , m_engine(ctx)
     , m_isServer(true)
+    , m_engineInitialized(false)
 {
     initEngine();
 }
@@ -39,8 +41,10 @@ SslSocket::SslSocket(SslSocket&& other) noexcept
     , m_ctx(other.m_ctx)
     , m_engine(std::move(other.m_engine))
     , m_isServer(other.m_isServer)
+    , m_engineInitialized(other.m_engineInitialized)
 {
     other.m_ctx = nullptr;
+    other.m_engineInitialized = false;
 }
 
 SslSocket& SslSocket::operator=(SslSocket&& other) noexcept
@@ -50,8 +54,10 @@ SslSocket& SslSocket::operator=(SslSocket&& other) noexcept
         m_ctx = other.m_ctx;
         m_engine = std::move(other.m_engine);
         m_isServer = other.m_isServer;
+        m_engineInitialized = other.m_engineInitialized;
 
         other.m_ctx = nullptr;
+        other.m_engineInitialized = false;
     }
     return *this;
 }
@@ -79,16 +85,29 @@ std::expected<void, SslError> SslSocket::setHostname(const std::string& hostname
     return m_engine.setHostname(hostname);
 }
 
-void SslSocket::initEngine()
+bool SslSocket::initEngine()
 {
-    if (m_controller.m_handle.fd >= 0 && m_engine.isValid()) {
-        (void)m_engine.setFd(m_controller.m_handle.fd);
-        if (m_isServer) {
-            m_engine.setAcceptState();
-        } else {
-            m_engine.setConnectState();
-        }
+    if (m_engineInitialized) {
+        return true;  // 已初始化，避免重复调用
     }
+
+    if (m_controller.m_handle.fd < 0 || !m_engine.isValid()) {
+        return false;
+    }
+
+    auto result = m_engine.setFd(m_controller.m_handle.fd);
+    if (!result) {
+        return false;
+    }
+
+    if (m_isServer) {
+        m_engine.setAcceptState();
+    } else {
+        m_engine.setConnectState();
+    }
+
+    m_engineInitialized = true;
+    return true;
 }
 
 AcceptAwaitable SslSocket::accept(Host* clientHost)
@@ -107,12 +126,9 @@ ConnectAwaitable SslSocket::connect(const Host& host)
 
 SslHandshakeAwaitable SslSocket::handshake()
 {
-    // 确保 SSL 引擎已初始化
-    if (!m_engine.isValid()) {
+    // 确保 SSL 引擎已初始化（只初始化一次）
+    if (!m_engineInitialized) {
         initEngine();
-    } else if (m_controller.m_handle.fd >= 0) {
-        // 确保 fd 已设置
-        (void)m_engine.setFd(m_controller.m_handle.fd);
     }
 
     return SslHandshakeAwaitable(&m_controller, &m_engine);

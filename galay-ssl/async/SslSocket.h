@@ -279,14 +279,16 @@ public:
 private:
     /**
      * @brief 初始化 SSL 引擎
+     * @return 成功返回 true
      */
-    void initEngine();
+    bool initEngine();
 
 private:
     IOController m_controller;  ///< IO 事件控制器
     SslContext* m_ctx;          ///< SSL 上下文（不拥有）
     SslEngine m_engine;         ///< SSL 引擎
     bool m_isServer;            ///< 是否为服务端模式
+    bool m_engineInitialized;   ///< SSL 引擎是否已初始化
 };
 
 } // namespace galay::ssl
