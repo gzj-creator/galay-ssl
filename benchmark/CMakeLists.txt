@@ -1,8 +1,8 @@
 if(BUILD_BENCHMARKS)
     # SSL 性能测试
-    add_executable(bench_ssl_server bench_ssl_server.cc)
-    target_link_libraries(bench_ssl_server PRIVATE galay-ssl)
+    add_executable(B1-SslBenchServer B1-SslBenchServer.cc)
+    target_link_libraries(B1-SslBenchServer PRIVATE galay-ssl)
 
-    add_executable(bench_ssl_client bench_ssl_client.cc)
-    target_link_libraries(bench_ssl_client PRIVATE galay-ssl)
+    add_executable(B1-SslBenchClient B1-SslBenchClient.cc)
+    target_link_libraries(B1-SslBenchClient PRIVATE galay-ssl)
 endif()
