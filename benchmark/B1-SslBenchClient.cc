@@ -16,6 +16,9 @@
 #ifdef USE_KQUEUE
 #include <galay-kernel/kernel/KqueueScheduler.h>
 using TestScheduler = galay::kernel::KqueueScheduler;
+#elif defined(USE_IOURING)
+#include <galay-kernel/kernel/IOUringScheduler.h>
+using TestScheduler = galay::kernel::IOUringScheduler;
 #elif defined(USE_EPOLL)
 #include <galay-kernel/kernel/EpollScheduler.h>
 using TestScheduler = galay::kernel::EpollScheduler;
@@ -72,7 +75,6 @@ Coroutine sslClient(SslContext* ctx,
                 continue;
             }
             // 其他错误则退出
-            std::cerr << "Handshake failed: " << err.message() << std::endl;
             g_errors++;
             co_await socket.close();
             g_connections_done++;
@@ -92,16 +94,36 @@ Coroutine sslClient(SslContext* ctx,
         }
         g_bytes_sent += sendResult.value();
 
-        // 接收
-        auto recvResult = co_await socket.recv(buffer, sizeof(buffer));
-        if (!recvResult) {
-            std::cerr << "Recv failed: " << recvResult.error().message()
-                      << " (ssl_error=" << recvResult.error().sslError() << ")" << std::endl;
-            g_errors++;
+        // 接收 - 需要循环直到成功读取数据
+        bool recvSuccess = false;
+        int recvAttempts = 0;
+        while (!recvSuccess && recvAttempts < 100) {
+            auto recvResult = co_await socket.recv(buffer, sizeof(buffer));
+            recvAttempts++;
+            if (!recvResult) {
+                auto& err = recvResult.error();
+                // WANT_READ/WANT_WRITE 表示需要继续等待
+                if (err.sslError() == SSL_ERROR_WANT_READ ||
+                    err.sslError() == SSL_ERROR_WANT_WRITE) {
+                    continue;
+                }
+                std::cerr << "Recv failed: " << err.message()
+                          << " (ssl_error=" << err.sslError() << ")"
+                          << " after sending " << g_bytes_sent << " bytes" << std::endl;
+                g_errors++;
+                break;
+            }
+            if (recvResult.value().size() == 0) {
+                std::cerr << "Recv returned 0 bytes (connection closed by peer)" << std::endl;
+                break;
+            }
+            g_bytes_recv += recvResult.value().size();
+            g_requests++;
+            recvSuccess = true;
+        }
+        if (!recvSuccess) {
             break;
         }
-        g_bytes_recv += recvResult.value().size();
-        g_requests++;
     }
 
     co_await socket.shutdown();

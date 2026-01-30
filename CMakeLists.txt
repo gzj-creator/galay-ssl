@@ -12,6 +12,7 @@ option(BUILD_TESTS "Build test executables" ON)
 option(BUILD_BENCHMARKS "Build benchmark executables" ON)
 option(BUILD_SHARED_LIBS "Build shared library" OFF)
 option(ENABLE_LOG "Enable logging with spdlog" ON)
+option(DISABLE_IOURING "Disable io_uring and use epoll on Linux" OFF)
 
 # 设置构建类型
 if(NOT CMAKE_BUILD_TYPE)
@@ -26,7 +27,19 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 if(APPLE)
     add_compile_definitions(USE_KQUEUE)
 elseif(UNIX AND NOT APPLE)
-    add_compile_definitions(USE_EPOLL)
+    if(DISABLE_IOURING)
+        message(STATUS "io_uring disabled, using epoll")
+        add_compile_definitions(USE_EPOLL)
+    else()
+        find_library(URING_LIB uring)
+        if(URING_LIB)
+            message(STATUS "Found liburing: ${URING_LIB}, using io_uring")
+            add_compile_definitions(USE_IOURING)
+        else()
+            message(STATUS "liburing not found, falling back to epoll")
+            add_compile_definitions(USE_EPOLL)
+        endif()
+    endif()
 endif()
 
 # 设置输出目录
@@ -46,17 +59,17 @@ message(STATUS "OpenSSL version: ${OPENSSL_VERSION}")
 message(STATUS "OpenSSL include dir: ${OPENSSL_INCLUDE_DIR}")
 message(STATUS "OpenSSL libraries: ${OPENSSL_LIBRARIES}")
 
-# 使用本地 galay-kernel 源码目录（开发模式）
-set(GALAY_KERNEL_SOURCE_DIR "/Users/gongzhijie/Desktop/projects/git/galay-kernel")
-set(GALAY_KERNEL_BUILD_DIR "${GALAY_KERNEL_SOURCE_DIR}/build")
+# 使用系统安装的 galay-kernel
+set(GALAY_KERNEL_INCLUDE_DIR "/usr/local/include")
+set(GALAY_KERNEL_LIB_DIR "/usr/local/lib")
 
 # 添加 galay-kernel 头文件路径
-include_directories(BEFORE ${GALAY_KERNEL_SOURCE_DIR})
+include_directories(BEFORE ${GALAY_KERNEL_INCLUDE_DIR})
 
 # 创建导入的静态库目标
 add_library(galay-kernel-dev STATIC IMPORTED)
 set_target_properties(galay-kernel-dev PROPERTIES
-    IMPORTED_LOCATION "${GALAY_KERNEL_BUILD_DIR}/lib/libgalay-kernel.a"
+    IMPORTED_LOCATION "${GALAY_KERNEL_LIB_DIR}/libgalay-kernel.a"
 )
 
 # 查找spdlog

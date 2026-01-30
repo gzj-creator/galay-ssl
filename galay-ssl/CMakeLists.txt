@@ -20,16 +20,28 @@ target_include_directories(galay-ssl
         $<INSTALL_INTERFACE:include/galay-ssl>
 )
 
-# 包含 galay-kernel 头文件路径（优先使用源码目录，以便获取最新修改）
+# 包含 galay-kernel 头文件路径
 target_include_directories(galay-ssl PUBLIC
-    /Users/gongzhijie/Desktop/projects/git/galay-kernel
     /usr/local/include
 )
 
-# 链接 galay-kernel（使用本地编译的库）
+# 查找平台相关库
+if(UNIX AND NOT APPLE)
+    find_library(URING_LIB uring)
+    find_library(AIO_LIB aio)
+    if(URING_LIB)
+        list(APPEND PLATFORM_LIBS ${URING_LIB})
+    endif()
+    if(AIO_LIB)
+        list(APPEND PLATFORM_LIBS ${AIO_LIB})
+    endif()
+endif()
+
+# 链接 galay-kernel（使用系统安装的库）
 target_link_libraries(galay-ssl PUBLIC
     galay-kernel-dev
     OpenSSL::SSL OpenSSL::Crypto
+    ${PLATFORM_LIBS}
 )
 
 # 链接 spdlog
