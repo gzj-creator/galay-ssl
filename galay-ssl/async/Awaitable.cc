@@ -222,6 +222,17 @@ std::expected<Bytes, SslError> SslRecvAwaitable::await_resume()
                     m_resultSet = true;
                     break;
 
+                case SslIOResult::WantRead:
+                    // 数据还没准备好，返回特定错误让调用者知道需要重试
+                    m_result = std::unexpected(SslError(SslErrorCode::kReadFailed, SSL_ERROR_WANT_READ));
+                    m_resultSet = true;
+                    break;
+
+                case SslIOResult::WantWrite:
+                    m_result = std::unexpected(SslError(SslErrorCode::kReadFailed, SSL_ERROR_WANT_WRITE));
+                    m_resultSet = true;
+                    break;
+
                 default:
                     m_result = std::unexpected(SslError::fromOpenSSL(SslErrorCode::kReadFailed));
                     m_resultSet = true;

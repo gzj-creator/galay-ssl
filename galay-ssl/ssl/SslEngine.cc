@@ -124,6 +124,7 @@ SslIOResult SslEngine::read(char* buffer, size_t length, size_t& bytesRead)
     }
 
     bytesRead = 0;
+    ERR_clear_error();  // 清除之前的错误
     int ret = SSL_read(m_ssl, buffer, static_cast<int>(length));
 
     if (ret > 0) {
@@ -131,7 +132,19 @@ SslIOResult SslEngine::read(char* buffer, size_t length, size_t& bytesRead)
         return SslIOResult::Success;
     }
 
-    return sslErrorToResult(SSL_get_error(m_ssl, ret));
+    int err = SSL_get_error(m_ssl, ret);
+
+    // 当 ret == 0 且 err == SSL_ERROR_SYSCALL 且 errno == 0 时表示 EOF
+    if (ret == 0 && err == SSL_ERROR_SYSCALL && errno == 0) {
+        return SslIOResult::ZeroReturn;
+    }
+
+    // 当 ret == 0 且 err == SSL_ERROR_ZERO_RETURN 时表示对端正常关闭
+    if (ret == 0 && err == SSL_ERROR_ZERO_RETURN) {
+        return SslIOResult::ZeroReturn;
+    }
+
+    return sslErrorToResult(err);
 }
 
 SslIOResult SslEngine::write(const char* buffer, size_t length, size_t& bytesWritten)

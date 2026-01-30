@@ -13,6 +13,9 @@
 #ifdef USE_KQUEUE
 #include <galay-kernel/kernel/KqueueScheduler.h>
 using TestScheduler = galay::kernel::KqueueScheduler;
+#elif defined(USE_IOURING)
+#include <galay-kernel/kernel/IOUringScheduler.h>
+using TestScheduler = galay::kernel::IOUringScheduler;
 #elif defined(USE_EPOLL)
 #include <galay-kernel/kernel/EpollScheduler.h>
 using TestScheduler = galay::kernel::EpollScheduler;
@@ -57,6 +60,12 @@ Coroutine handleClient(SslContext* ctx, GHandle handle) {
     while (g_running) {
         auto recvResult = co_await client.recv(buffer, sizeof(buffer));
         if (!recvResult) {
+            auto& err = recvResult.error();
+            // WANT_READ/WANT_WRITE 表示需要继续等待
+            if (err.sslError() == SSL_ERROR_WANT_READ ||
+                err.sslError() == SSL_ERROR_WANT_WRITE) {
+                continue;
+            }
             break;
         }
 
