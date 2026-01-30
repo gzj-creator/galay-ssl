@@ -10,6 +10,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # 构建选项
 option(BUILD_TESTS "Build test executables" ON)
 option(BUILD_BENCHMARKS "Build benchmark executables" ON)
+option(BUILD_EXAMPLES "Build example executables" ON)
 option(BUILD_SHARED_LIBS "Build shared library" OFF)
 option(ENABLE_LOG "Enable logging with spdlog" ON)
 option(DISABLE_IOURING "Disable io_uring and use epoll on Linux" OFF)
@@ -96,4 +97,8 @@ endif()
 
 if(BUILD_BENCHMARKS)
     add_subdirectory(benchmark)
+endif()
+
+if(BUILD_EXAMPLES)
+    add_subdirectory(examples)
 endif()
