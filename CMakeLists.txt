@@ -35,7 +35,7 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 # 设置安装目录
-set(CMAKE_INSTALL_PREFIX /usr/local/galay-ssl)
+set(CMAKE_INSTALL_PREFIX /usr/local)
 
 # 查找OpenSSL
 find_package(OpenSSL REQUIRED)
