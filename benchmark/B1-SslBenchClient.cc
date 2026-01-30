@@ -86,6 +86,7 @@ Coroutine sslClient(SslContext* ctx,
         // 发送
         auto sendResult = co_await socket.send(message.c_str(), message.size());
         if (!sendResult) {
+            std::cerr << "Send failed: " << sendResult.error().message() << std::endl;
             g_errors++;
             break;
         }
@@ -94,6 +95,8 @@ Coroutine sslClient(SslContext* ctx,
         // 接收
         auto recvResult = co_await socket.recv(buffer, sizeof(buffer));
         if (!recvResult) {
+            std::cerr << "Recv failed: " << recvResult.error().message()
+                      << " (ssl_error=" << recvResult.error().sslError() << ")" << std::endl;
             g_errors++;
             break;
         }
