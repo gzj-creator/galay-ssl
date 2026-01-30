@@ -39,7 +39,7 @@ endif()
 
 # 链接 galay-kernel（使用系统安装的库）
 target_link_libraries(galay-ssl PUBLIC
-    galay-kernel-dev
+    galay-kernel
     OpenSSL::SSL OpenSSL::Crypto
     ${PLATFORM_LIBS}
 )
