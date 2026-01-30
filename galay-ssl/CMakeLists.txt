@@ -72,9 +72,13 @@ install(TARGETS galay-ssl
     INCLUDES DESTINATION include
 )
 
-# 安装头文件
-install(FILES ${HEADERS}
+# 安装头文件（保留目录结构）
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
     DESTINATION include/galay-ssl
+    FILES_MATCHING
+    PATTERN "*.h"
+    PATTERN "*.hpp"
+    PATTERN "*.cc" EXCLUDE
 )
 
 # 安装配置文件
