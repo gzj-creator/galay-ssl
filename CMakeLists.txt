@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.16)
 
 project(galay-ssl VERSION 1.0.0 LANGUAGES CXX)
 
+if(POLICY CMP0069)
+    cmake_policy(SET CMP0069 NEW)
+endif()
+
 # 设置C++标准
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,18 +15,31 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(BUILD_TESTS "Build test executables" ON)
 option(BUILD_BENCHMARKS "Build benchmark executables" ON)
 option(BUILD_EXAMPLES "Build example executables" ON)
-option(BUILD_SHARED_LIBS "Build shared library" OFF)
+option(BUILD_SHARED_LIBS "Build shared library" ON)
 option(ENABLE_LOG "Enable logging with spdlog" ON)
 option(DISABLE_IOURING "Disable io_uring and use epoll on Linux" OFF)
+option(ENABLE_LTO "Enable IPO/LTO for Release builds" ON)
 
 # 设置构建类型
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Release)
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
 # 编译选项
 set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -DDEBUG")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+
+if(ENABLE_LTO)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT GALAY_SSL_IPO_SUPPORTED OUTPUT GALAY_SSL_IPO_OUTPUT)
+    if(GALAY_SSL_IPO_SUPPORTED)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO ON)
+        message(STATUS "LTO enabled for Release/RelWithDebInfo builds")
+    else()
+        message(WARNING "ENABLE_LTO=ON but IPO is not supported: ${GALAY_SSL_IPO_OUTPUT}")
+    endif()
+endif()
 
 # 检测平台并设置调度器宏
 if(APPLE)

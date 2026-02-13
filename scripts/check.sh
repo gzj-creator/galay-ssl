@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_DIR/build"
 BIN_DIR="$BUILD_DIR/bin"
+CACHE_FILE="$BUILD_DIR/CMakeCache.txt"
 
 check_tests() {
     echo "=========================================="
@@ -65,6 +66,22 @@ check_benchmarks() {
         return 1
     fi
 
+    if [ ! -f "$CACHE_FILE" ]; then
+        echo "WARNING: CMakeCache.txt not found, cannot verify Release+LTO"
+        return 1
+    fi
+
+    local build_type
+    build_type=$(grep -E "^CMAKE_BUILD_TYPE:STRING=" "$CACHE_FILE" | cut -d'=' -f2)
+    local lto
+    lto=$(grep -E "^ENABLE_LTO:BOOL=" "$CACHE_FILE" | cut -d'=' -f2 || true)
+
+    if [ "$build_type" != "Release" ] || [ "$lto" != "ON" ]; then
+        echo "WARNING: Benchmark build is not Release+LTO (CMAKE_BUILD_TYPE=$build_type, ENABLE_LTO=$lto)"
+        return 1
+    fi
+
+    echo "OK: Benchmark build type is Release+LTO"
     echo "PASSED: All benchmark binaries present"
     return 0
 }

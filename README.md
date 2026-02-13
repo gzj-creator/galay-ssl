@@ -24,11 +24,11 @@
 ```bash
 mkdir build && cd build
 
-# 使用 io_uring (默认，需要 liburing)
-cmake .. -DCMAKE_BUILD_TYPE=Release
+# 使用 io_uring (默认，需要 liburing)，统一 Release+LTO
+cmake .. -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=ON
 
-# 使用 epoll
-cmake .. -DCMAKE_BUILD_TYPE=Release -DDISABLE_IOURING=ON
+# 使用 epoll（同样保持 Release+LTO）
+cmake .. -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=ON -DDISABLE_IOURING=ON
 
 make -j$(nproc)
 ```

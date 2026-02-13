@@ -12,7 +12,7 @@ build_project() {
     echo "Building project..."
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
-    cmake .. -DBUILD_TESTS=ON -DBUILD_BENCHMARKS=ON
+    cmake .. -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=ON -DBUILD_TESTS=ON -DBUILD_BENCHMARKS=ON
     make -j$(sysctl -n hw.ncpu 2>/dev/null || nproc)
     cd "$PROJECT_DIR"
 }

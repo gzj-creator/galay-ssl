@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_DIR/build"
 BIN_DIR="$BUILD_DIR/bin"
+CACHE_FILE="$BUILD_DIR/CMakeCache.txt"
 
 SERVER_PORT=8443
 SERVER_PID=""
@@ -19,6 +20,30 @@ cleanup() {
 }
 
 trap cleanup EXIT
+
+ensure_release_lto() {
+    if [ ! -f "$CACHE_FILE" ]; then
+        echo "ERROR: $CACHE_FILE not found. Please build first with Release+LTO."
+        echo "Hint: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=ON && cmake --build build -j"
+        exit 1
+    fi
+
+    local build_type
+    build_type=$(grep -E "^CMAKE_BUILD_TYPE:STRING=" "$CACHE_FILE" | cut -d'=' -f2)
+    if [ "$build_type" != "Release" ]; then
+        echo "ERROR: Benchmark requires Release build, current is '$build_type'."
+        echo "Hint: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=ON && cmake --build build -j"
+        exit 1
+    fi
+
+    local lto
+    lto=$(grep -E "^ENABLE_LTO:BOOL=" "$CACHE_FILE" | cut -d'=' -f2 || true)
+    if [ "$lto" != "ON" ]; then
+        echo "ERROR: Benchmark requires ENABLE_LTO=ON."
+        echo "Hint: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=ON && cmake --build build -j"
+        exit 1
+    fi
+}
 
 start_server() {
     echo "Starting SSL server on port $SERVER_PORT..."
@@ -72,6 +97,8 @@ main() {
     echo "=========================================="
     echo "  galay-ssl Performance Benchmark"
     echo "=========================================="
+
+    ensure_release_lto
 
     if [ ! -f "$BIN_DIR/B1-SslBenchServer" ] || [ ! -f "$BIN_DIR/B1-SslBenchClient" ]; then
         echo "ERROR: Binaries not found. Please build first."
