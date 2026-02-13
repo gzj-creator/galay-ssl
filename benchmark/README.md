@@ -29,7 +29,7 @@ SSL客户端性能测试程序，模拟多个并发连接。
 
 **用法：**
 ```bash
-./build/bin/B1-SslBenchClient <host> <port> <connections> <requests_per_conn> [payload_bytes]
+./build/bin/B1-SslBenchClient <host> <port> <connections> <requests_per_conn> [payload_bytes] [threads]
 ```
 
 **参数：**
@@ -38,6 +38,7 @@ SSL客户端性能测试程序，模拟多个并发连接。
 - `connections`: 并发连接数
 - `requests_per_conn`: 每个连接的请求数
 - `payload_bytes`: 可选，单次请求发送的 payload 大小（字节）。默认 47 字节（与历史报告一致）。
+- `threads`: 可选，客户端压测线程数（默认 1）。
 
 **示例：**
 ```bash
@@ -45,7 +46,7 @@ SSL客户端性能测试程序，模拟多个并发连接。
 ./build/bin/B1-SslBenchClient 127.0.0.1 8443 100 1000
 
 # 64KiB 大包压测
-./build/bin/B1-SslBenchClient 127.0.0.1 8443 50 200 65536
+./build/bin/B1-SslBenchClient 127.0.0.1 8443 50 200 65536 4
 ```
 
 ## 运行完整测试
@@ -65,6 +66,9 @@ bash test/certs/generate_certs.sh
 ./build/bin/B1-SslBenchClient 127.0.0.1 8443 50 100
 ```
 
+历史对照数据（OpenSSL + libevent）已迁移到 `docs/B1-SSL压测报告.md`，
+当前仓库仅保留 `B1-SslBenchServer/B1-SslBenchClient` 压测程序。
+
 ## 性能指标
 
 客户端程序会输出以下性能指标：
@@ -76,6 +80,15 @@ bash test/certs/generate_certs.sh
 - 测试持续时间
 - QPS (每秒请求数)
 - 吞吐量 (MB/s)
+
+可选统计（仅 benchmark 侧，不进入核心库代码路径）：
+```bash
+GALAY_SSL_STATS=1 ./build/bin/B1-SslBenchClient 127.0.0.1 8443 50 200 47 4
+```
+会额外输出：
+- Send ops / send plain bytes
+- Recv ops / recv plain bytes / recv chunks
+- Avg recv chunk bytes
 
 服务端程序会实时显示：
 - 当前连接数

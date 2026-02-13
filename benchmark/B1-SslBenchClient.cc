@@ -5,6 +5,7 @@
 
 #include "galay-ssl/async/SslSocket.h"
 #include "galay-ssl/ssl/SslContext.h"
+#include "SslStats.h"
 #include <galay-kernel/kernel/Coroutine.h>
 #include <iostream>
 #include <atomic>
@@ -13,6 +14,8 @@
 #include <vector>
 #include <thread>
 #include <chrono>
+#include <cstdlib>
+#include <string>
 
 #ifdef USE_KQUEUE
 #include <galay-kernel/kernel/KqueueScheduler.h>
@@ -34,6 +37,11 @@ std::atomic<uint64_t> g_bytes_sent{0};
 std::atomic<uint64_t> g_bytes_recv{0};
 std::atomic<uint64_t> g_errors{0};
 std::atomic<uint64_t> g_connections_done{0};
+std::atomic<uint64_t> g_connect_fail{0};
+std::atomic<uint64_t> g_handshake_fail{0};
+std::atomic<uint64_t> g_send_fail{0};
+std::atomic<uint64_t> g_recv_fail{0};
+std::atomic<uint64_t> g_peer_closed{0};
 
 void signalHandler(int) {
     g_running = false;
@@ -41,12 +49,16 @@ void signalHandler(int) {
 
 Coroutine sslClient(SslContext* ctx,
                     const std::string& host, uint16_t port,
-                    const std::string& message, int requestCount) {
+                    const std::string& message, int requestCount,
+                    std::atomic<int>* thread_done) {
     SslSocket socket(ctx);
 
     if (!socket.isValid()) {
         g_errors++;
         g_connections_done++;
+        if (thread_done) {
+            (*thread_done)++;
+        }
         co_return;
     }
 
@@ -58,10 +70,13 @@ Coroutine sslClient(SslContext* ctx,
     // 连接
     auto connectResult = co_await socket.connect(Host(IPType::IPV4, host, port));
     if (!connectResult) {
-        std::cerr << "Connect failed: " << connectResult.error().message() << std::endl;
         g_errors++;
+        g_connect_fail++;
         co_await socket.close();
         g_connections_done++;
+        if (thread_done) {
+            (*thread_done)++;
+        }
         co_return;
     }
 
@@ -77,26 +92,32 @@ Coroutine sslClient(SslContext* ctx,
             }
             // 其他错误则退出
             g_errors++;
+            g_handshake_fail++;
             co_await socket.close();
             g_connections_done++;
+            if (thread_done) {
+                (*thread_done)++;
+            }
             co_return;
         }
         break;  // 握手成功
     }
 
+    std::vector<char> buffer(std::min<size_t>(64 * 1024, message.size()));
+
     for (int i = 0; i < requestCount && g_running; i++) {
         // 发送
         auto sendResult = co_await socket.send(message.c_str(), message.size());
         if (!sendResult) {
-            std::cerr << "Send failed: " << sendResult.error().message() << std::endl;
             g_errors++;
+            g_send_fail++;
             break;
         }
         g_bytes_sent += sendResult.value();
+        bench::sslStatsAddSend(sendResult.value());
 
         // 接收 - echo 是字节流，可能被拆包；按发送长度累计读满
         size_t remaining = message.size();
-        std::vector<char> buffer(std::min<size_t>(64 * 1024, remaining));
         int recvLoops = 0;
         bool recvFailed = false;
         // 防止异常情况下无限等待（比如少读/漏读导致 remaining 永远不为 0）
@@ -111,19 +132,19 @@ Coroutine sslClient(SslContext* ctx,
                     err.sslError() == SSL_ERROR_WANT_WRITE) {
                     continue;
                 }
-                std::cerr << "Recv failed: " << err.message()
-                          << " (ssl_error=" << err.sslError() << ")"
-                          << " after sending " << g_bytes_sent << " bytes" << std::endl;
                 recvFailed = true;
+                g_recv_fail++;
                 break;
             }
             if (recvResult.value().size() == 0) {
-                std::cerr << "Recv returned 0 bytes (connection closed by peer)" << std::endl;
                 recvFailed = true;
+                g_peer_closed++;
                 break;
             }
-            g_bytes_recv += recvResult.value().size();
-            remaining -= recvResult.value().size();
+            const size_t received = recvResult.value().size();
+            g_bytes_recv += received;
+            bench::sslStatsAddRecv(received);
+            remaining -= received;
         }
         if (recvFailed || remaining != 0) {
             g_errors++;
@@ -135,13 +156,56 @@ Coroutine sslClient(SslContext* ctx,
     co_await socket.shutdown();
     co_await socket.close();
     g_connections_done++;
+    if (thread_done) {
+        (*thread_done)++;
+    }
+}
+
+void runClientThread(const std::string& host, uint16_t port,
+                     int connections, int requestsPerConn,
+                     size_t payloadBytes) {
+    // 创建 SSL 上下文
+    SslContext ctx(SslMethod::TLS_Client);
+    if (!ctx.isValid()) {
+        g_errors += connections;
+        g_connections_done += connections;
+        return;
+    }
+
+    // 加载CA证书，即使不验证（用于建立信任链）
+    auto caResult = ctx.loadCACertificate("certs/ca.crt");
+    if (!caResult) {
+        g_errors += connections;
+        g_connections_done += connections;
+        return;
+    }
+
+    // 不验证服务器证书（测试用）
+    ctx.setVerifyMode(SslVerifyMode::None);
+
+    // 创建调度器
+    TestScheduler scheduler;
+    scheduler.start();
+
+    // 固定 payload，避免构造成本影响压测结果；内容无所谓（echo 只看字节流）
+    std::string message(payloadBytes, 'x');
+    std::atomic<int> thread_done{0};
+
+    // 启动客户端连接
+    for (int i = 0; i < connections; i++) {
+        scheduler.spawn(sslClient(&ctx, host, port, message, requestsPerConn, &thread_done));
+    }
+
+    // 等待完成
+    while (g_running && thread_done.load() < connections) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    scheduler.stop();
 }
 
 int main(int argc, char* argv[]) {
     if (argc < 5) {
-        std::cerr << "Usage: " << argv[0]
-                  << " <host> <port> <connections> <requests_per_conn> [payload_bytes]"
-                  << std::endl;
         return 1;
     }
 
@@ -157,61 +221,61 @@ int main(int argc, char* argv[]) {
             payloadBytes = 1;
         }
     }
+    int threads = 1;
+    if (argc >= 7) {
+        threads = std::max(1, std::stoi(argv[6]));
+    }
 
     // 设置信号处理
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);
     signal(SIGPIPE, SIG_IGN);
 
-    // 创建 SSL 上下文
-    SslContext ctx(SslMethod::TLS_Client);
-    if (!ctx.isValid()) {
-        std::cerr << "Failed to create SSL context" << std::endl;
-        return 1;
-    }
-
-    // 加载CA证书，即使不验证（用于建立信任链）
-    auto caResult = ctx.loadCACertificate("certs/ca.crt");
-    if (!caResult) {
-        std::cerr << "Failed to load CA certificate: " << caResult.error().message() << std::endl;
-        return 1;
-    }
-
-    // 不验证服务器证书（测试用）
-    ctx.setVerifyMode(SslVerifyMode::None);
-
-    // 创建调度器
-    TestScheduler scheduler;
-    scheduler.start();
-
-    // 固定 payload，避免构造成本影响压测结果；内容无所谓（echo 只看字节流）
-    std::string message(payloadBytes, 'x');
+    const char* statsEnv = std::getenv("GALAY_SSL_STATS");
+    const bool statsEnabled = statsEnv != nullptr && statsEnv[0] != '\0' && std::string(statsEnv) != "0";
+    bench::sslStatsSetEnabled(statsEnabled);
 
     auto startTime = std::chrono::high_resolution_clock::now();
 
-    // 启动客户端连接
-    for (int i = 0; i < connections; i++) {
-        scheduler.spawn(sslClient(&ctx, host, port, message, requestsPerConn));
+    int baseConns = connections / threads;
+    int remainder = connections % threads;
+    std::vector<std::thread> workers;
+    workers.reserve(threads);
+
+    for (int i = 0; i < threads; ++i) {
+        int conns = baseConns + (i < remainder ? 1 : 0);
+        if (conns == 0) {
+            continue;
+        }
+        workers.emplace_back(runClientThread, host, port, conns, requestsPerConn, payloadBytes);
     }
 
-    // 等待完成
-    while (g_running && g_connections_done < static_cast<uint64_t>(connections)) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    for (auto& t : workers) {
+        t.join();
     }
 
     auto endTime = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
 
     g_running = false;
-    scheduler.stop();
 
     std::cout << "\nBenchmark Results:" << std::endl;
     std::cout << "==================" << std::endl;
     std::cout << "Connections: " << connections << std::endl;
     std::cout << "Requests per connection: " << requestsPerConn << std::endl;
     std::cout << "Payload bytes: " << payloadBytes << std::endl;
+    std::cout << "Threads: " << threads << std::endl;
     std::cout << "Total requests: " << g_requests << std::endl;
     std::cout << "Total errors: " << g_errors << std::endl;
+    if (g_errors.load() > 0) {
+        std::cout << "Error breakdown: "
+                  << "connect=" << g_connect_fail.load()
+                  << " handshake=" << g_handshake_fail.load()
+                  << " send=" << g_send_fail.load()
+                  << " recv=" << g_recv_fail.load()
+                  << " peer_closed=" << g_peer_closed.load()
+                  << std::endl;
+    }
     std::cout << "Total bytes sent: " << g_bytes_sent << std::endl;
     std::cout << "Total bytes received: " << g_bytes_recv << std::endl;
     std::cout << "Duration: " << duration.count() << " ms" << std::endl;
@@ -221,6 +285,21 @@ int main(int argc, char* argv[]) {
         double throughput = static_cast<double>(g_bytes_sent + g_bytes_recv) / 1024.0 / 1024.0 * 1000.0 / duration.count();
         std::cout << "Requests/sec: " << rps << std::endl;
         std::cout << "Throughput: " << throughput << " MB/s" << std::endl;
+    }
+
+    if (statsEnabled) {
+        auto stats = bench::sslStatsSnapshot();
+        std::cout << "\nSSL IO Stats (Benchmark-side):" << std::endl;
+        std::cout << "Send ops: " << stats.send_ops
+                  << ", send plain bytes: " << stats.send_plain_bytes << std::endl;
+        std::cout << "Recv ops: " << stats.recv_ops
+                  << ", recv plain bytes: " << stats.recv_plain_bytes
+                  << ", recv chunks: " << stats.recv_chunks << std::endl;
+        if (stats.recv_chunks > 0) {
+            const double avg_chunk = static_cast<double>(stats.recv_plain_bytes) /
+                                     static_cast<double>(stats.recv_chunks);
+            std::cout << "Avg recv chunk bytes: " << avg_chunk << std::endl;
+        }
     }
 
     return 0;
