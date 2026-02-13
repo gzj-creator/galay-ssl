@@ -59,11 +59,40 @@ public:
     SSL* native() const { return m_ssl; }
 
     /**
-     * @brief 设置文件描述符
+     * @brief 设置文件描述符（旧模式，已弃用）
      * @param fd socket 文件描述符
      * @return 成功返回 void，失败返回 SslError
+     * @deprecated 使用 initMemoryBIO() 替代
      */
     std::expected<void, SslError> setFd(int fd);
+
+    /**
+     * @brief 使用 Memory BIO 初始化（IO 与 SSL 解耦）
+     * @return 成功返回 void，失败返回 SslError
+     */
+    std::expected<void, SslError> initMemoryBIO();
+
+    /**
+     * @brief 将从网络 recv 到的密文喂给 SSL（写入 rbio）
+     * @param data 密文数据
+     * @param length 数据长度
+     * @return 实际写入 BIO 的字节数，-1 表示错误
+     */
+    int feedEncryptedInput(const char* data, size_t length);
+
+    /**
+     * @brief 从 SSL 取出待发送的密文（读取 wbio）
+     * @param buffer 输出缓冲区
+     * @param length 缓冲区大小
+     * @return 实际读取的字节数，0 表示无数据，-1 表示错误
+     */
+    int extractEncryptedOutput(char* buffer, size_t length);
+
+    /**
+     * @brief 检查 wbio 中是否有待发送的密文
+     * @return 待发送的密文字节数
+     */
+    size_t pendingEncryptedOutput() const;
 
     /**
      * @brief 设置 SNI 主机名
@@ -189,6 +218,8 @@ private:
     SSL* m_ssl;                         ///< OpenSSL SSL 对象
     SslContext* m_ctx;                  ///< SSL 上下文（不拥有）
     SslHandshakeState m_handshakeState; ///< 握手状态
+    BIO* m_rbio = nullptr;             ///< read BIO（网络密文 → SSL）
+    BIO* m_wbio = nullptr;             ///< write BIO（SSL → 网络密文）
 };
 
 } // namespace galay::ssl

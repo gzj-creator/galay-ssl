@@ -9,6 +9,7 @@
 #include <iostream>
 #include <atomic>
 #include <csignal>
+#include <algorithm>
 #include <vector>
 #include <thread>
 #include <chrono>
@@ -83,7 +84,6 @@ Coroutine sslClient(SslContext* ctx,
         break;  // 握手成功
     }
 
-    char buffer[4096];
     for (int i = 0; i < requestCount && g_running; i++) {
         // 发送
         auto sendResult = co_await socket.send(message.c_str(), message.size());
@@ -94,12 +94,16 @@ Coroutine sslClient(SslContext* ctx,
         }
         g_bytes_sent += sendResult.value();
 
-        // 接收 - 需要循环直到成功读取数据
-        bool recvSuccess = false;
-        int recvAttempts = 0;
-        while (!recvSuccess && recvAttempts < 100) {
-            auto recvResult = co_await socket.recv(buffer, sizeof(buffer));
-            recvAttempts++;
+        // 接收 - echo 是字节流，可能被拆包；按发送长度累计读满
+        size_t remaining = message.size();
+        std::vector<char> buffer(std::min<size_t>(64 * 1024, remaining));
+        int recvLoops = 0;
+        bool recvFailed = false;
+        // 防止异常情况下无限等待（比如少读/漏读导致 remaining 永远不为 0）
+        const int kMaxRecvLoops = 200000;
+        while (remaining > 0 && recvLoops++ < kMaxRecvLoops) {
+            auto recvLen = std::min(remaining, buffer.size());
+            auto recvResult = co_await socket.recv(buffer.data(), recvLen);
             if (!recvResult) {
                 auto& err = recvResult.error();
                 // WANT_READ/WANT_WRITE 表示需要继续等待
@@ -110,20 +114,22 @@ Coroutine sslClient(SslContext* ctx,
                 std::cerr << "Recv failed: " << err.message()
                           << " (ssl_error=" << err.sslError() << ")"
                           << " after sending " << g_bytes_sent << " bytes" << std::endl;
-                g_errors++;
+                recvFailed = true;
                 break;
             }
             if (recvResult.value().size() == 0) {
                 std::cerr << "Recv returned 0 bytes (connection closed by peer)" << std::endl;
+                recvFailed = true;
                 break;
             }
             g_bytes_recv += recvResult.value().size();
-            g_requests++;
-            recvSuccess = true;
+            remaining -= recvResult.value().size();
         }
-        if (!recvSuccess) {
+        if (recvFailed || remaining != 0) {
+            g_errors++;
             break;
         }
+        g_requests++;
     }
 
     co_await socket.shutdown();
@@ -133,7 +139,9 @@ Coroutine sslClient(SslContext* ctx,
 
 int main(int argc, char* argv[]) {
     if (argc < 5) {
-        std::cerr << "Usage: " << argv[0] << " <host> <port> <connections> <requests_per_conn>" << std::endl;
+        std::cerr << "Usage: " << argv[0]
+                  << " <host> <port> <connections> <requests_per_conn> [payload_bytes]"
+                  << std::endl;
         return 1;
     }
 
@@ -141,6 +149,14 @@ int main(int argc, char* argv[]) {
     uint16_t port = static_cast<uint16_t>(std::stoi(argv[2]));
     int connections = std::stoi(argv[3]);
     int requestsPerConn = std::stoi(argv[4]);
+    // 保持默认与历史压测一致（47 字节），大包场景用第 5 个参数显式指定。
+    size_t payloadBytes = 47;
+    if (argc >= 6) {
+        payloadBytes = static_cast<size_t>(std::stoull(argv[5]));
+        if (payloadBytes == 0) {
+            payloadBytes = 1;
+        }
+    }
 
     // 设置信号处理
     signal(SIGINT, signalHandler);
@@ -168,7 +184,8 @@ int main(int argc, char* argv[]) {
     TestScheduler scheduler;
     scheduler.start();
 
-    std::string message = "Hello, SSL Server! This is a benchmark message.";
+    // 固定 payload，避免构造成本影响压测结果；内容无所谓（echo 只看字节流）
+    std::string message(payloadBytes, 'x');
 
     auto startTime = std::chrono::high_resolution_clock::now();
 
@@ -192,6 +209,7 @@ int main(int argc, char* argv[]) {
     std::cout << "==================" << std::endl;
     std::cout << "Connections: " << connections << std::endl;
     std::cout << "Requests per connection: " << requestsPerConn << std::endl;
+    std::cout << "Payload bytes: " << payloadBytes << std::endl;
     std::cout << "Total requests: " << g_requests << std::endl;
     std::cout << "Total errors: " << g_errors << std::endl;
     std::cout << "Total bytes sent: " << g_bytes_sent << std::endl;

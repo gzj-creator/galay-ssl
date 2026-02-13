@@ -95,7 +95,7 @@ bool SslSocket::initEngine()
         return false;
     }
 
-    auto result = m_engine.setFd(m_controller.m_handle.fd);
+    auto result = m_engine.initMemoryBIO();
     if (!result) {
         return false;
     }

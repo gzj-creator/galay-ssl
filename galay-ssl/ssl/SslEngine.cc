@@ -25,10 +25,14 @@ SslEngine::SslEngine(SslEngine&& other) noexcept
     : m_ssl(other.m_ssl)
     , m_ctx(other.m_ctx)
     , m_handshakeState(other.m_handshakeState)
+    , m_rbio(other.m_rbio)
+    , m_wbio(other.m_wbio)
 {
     other.m_ssl = nullptr;
     other.m_ctx = nullptr;
     other.m_handshakeState = SslHandshakeState::NotStarted;
+    other.m_rbio = nullptr;
+    other.m_wbio = nullptr;
 }
 
 SslEngine& SslEngine::operator=(SslEngine&& other) noexcept
@@ -40,9 +44,13 @@ SslEngine& SslEngine::operator=(SslEngine&& other) noexcept
         m_ssl = other.m_ssl;
         m_ctx = other.m_ctx;
         m_handshakeState = other.m_handshakeState;
+        m_rbio = other.m_rbio;
+        m_wbio = other.m_wbio;
         other.m_ssl = nullptr;
         other.m_ctx = nullptr;
         other.m_handshakeState = SslHandshakeState::NotStarted;
+        other.m_rbio = nullptr;
+        other.m_wbio = nullptr;
     }
     return *this;
 }
@@ -58,6 +66,45 @@ std::expected<void, SslError> SslEngine::setFd(int fd)
     }
 
     return {};
+}
+
+std::expected<void, SslError> SslEngine::initMemoryBIO()
+{
+    if (!m_ssl) {
+        return std::unexpected(SslError(SslErrorCode::kSslCreateFailed));
+    }
+
+    m_rbio = BIO_new(BIO_s_mem());
+    m_wbio = BIO_new(BIO_s_mem());
+    if (!m_rbio || !m_wbio) {
+        if (m_rbio) BIO_free(m_rbio);
+        if (m_wbio) BIO_free(m_wbio);
+        m_rbio = nullptr;
+        m_wbio = nullptr;
+        return std::unexpected(SslError(SslErrorCode::kSslCreateFailed));
+    }
+
+    // SSL_set_bio 接管 BIO 生命周期，SSL_free 时自动释放
+    SSL_set_bio(m_ssl, m_rbio, m_wbio);
+    return {};
+}
+
+int SslEngine::feedEncryptedInput(const char* data, size_t length)
+{
+    if (!m_rbio) return -1;
+    return BIO_write(m_rbio, data, static_cast<int>(length));
+}
+
+int SslEngine::extractEncryptedOutput(char* buffer, size_t length)
+{
+    if (!m_wbio) return -1;
+    return BIO_read(m_wbio, buffer, static_cast<int>(length));
+}
+
+size_t SslEngine::pendingEncryptedOutput() const
+{
+    if (!m_wbio) return 0;
+    return BIO_ctrl_pending(m_wbio);
 }
 
 std::expected<void, SslError> SslEngine::setHostname(const std::string& hostname)

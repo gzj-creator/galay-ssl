@@ -4,13 +4,13 @@
 
 ## 测试程序
 
-### bench_ssl_server
+### B1-SslBenchServer
 
 SSL服务端性能测试程序，模拟echo服务器。
 
 **用法：**
 ```bash
-./bench_ssl_server <port> <cert_file> <key_file>
+./build/bin/B1-SslBenchServer <port> <cert_file> <key_file>
 ```
 
 **参数：**
@@ -20,16 +20,16 @@ SSL服务端性能测试程序，模拟echo服务器。
 
 **示例：**
 ```bash
-./bench_ssl_server 8443 certs/server.crt certs/server.key
+./build/bin/B1-SslBenchServer 8443 certs/server.crt certs/server.key
 ```
 
-### bench_ssl_client
+### B1-SslBenchClient
 
 SSL客户端性能测试程序，模拟多个并发连接。
 
 **用法：**
 ```bash
-./bench_ssl_client <host> <port> <connections> <requests_per_conn>
+./build/bin/B1-SslBenchClient <host> <port> <connections> <requests_per_conn> [payload_bytes]
 ```
 
 **参数：**
@@ -37,28 +37,32 @@ SSL客户端性能测试程序，模拟多个并发连接。
 - `port`: 服务端端口
 - `connections`: 并发连接数
 - `requests_per_conn`: 每个连接的请求数
+- `payload_bytes`: 可选，单次请求发送的 payload 大小（字节）。默认 47 字节（与历史报告一致）。
 
 **示例：**
 ```bash
-./bench_ssl_client 127.0.0.1 8443 100 1000
+# 默认 47 字节 payload
+./build/bin/B1-SslBenchClient 127.0.0.1 8443 100 1000
+
+# 64KiB 大包压测
+./build/bin/B1-SslBenchClient 127.0.0.1 8443 50 200 65536
 ```
 
 ## 运行完整测试
 
 1. 生成测试证书（如果还没有生成）：
 ```bash
-cd ../test/certs
-bash generate_certs.sh
+bash test/certs/generate_certs.sh
 ```
 
 2. 启动服务端：
 ```bash
-./bench_ssl_server 8443 ../test/certs/server.crt ../test/certs/server.key
+./build/bin/B1-SslBenchServer 8443 test/certs/server.crt test/certs/server.key
 ```
 
 3. 在另一个终端启动客户端：
 ```bash
-./bench_ssl_client 127.0.0.1 8443 50 100
+./build/bin/B1-SslBenchClient 127.0.0.1 8443 50 100
 ```
 
 ## 性能指标
@@ -81,5 +85,5 @@ bash generate_certs.sh
 
 - 测试使用自签名证书，客户端默认跳过证书验证
 - 服务端支持多个并发连接
-- 客户端使用固定消息大小进行echo测试
+- 客户端按请求粒度发送固定大小 payload（可通过 `payload_bytes` 调整），并会把 echo 读满该长度后再计为一次请求完成
 - 程序使用SIGINT/SIGTERM进行优雅关闭
