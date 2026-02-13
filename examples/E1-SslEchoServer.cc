@@ -16,6 +16,8 @@
 #include <iostream>
 #include <csignal>
 #include <atomic>
+#include <cerrno>
+#include <cstring>
 #include "galay-ssl/async/SslSocket.h"
 #include "galay-ssl/ssl/SslContext.h"
 #include <galay-kernel/kernel/Coroutine.h>
@@ -35,6 +37,10 @@ using namespace galay::ssl;
 using namespace galay::kernel;
 
 std::atomic<bool> g_running{true};
+
+void logErrno(const char* prefix) {
+    std::cerr << prefix << ": errno=" << errno << " (" << std::strerror(errno) << ")" << std::endl;
+}
 
 void signalHandler(int) {
     g_running = false;
@@ -58,7 +64,6 @@ Coroutine handleClient(SslContext* ctx, GHandle handle) {
                 err.code() == SslErrorCode::kHandshakeWantWrite) {
                 continue;
             }
-            std::cerr << "Handshake failed: " << err.message() << std::endl;
             co_await client.close();
             co_return;
         }
@@ -72,7 +77,6 @@ Coroutine handleClient(SslContext* ctx, GHandle handle) {
     while (g_running) {
         auto recvResult = co_await client.recv(buffer, sizeof(buffer));
         if (!recvResult) {
-            std::cerr << "Recv error: " << recvResult.error().message() << std::endl;
             break;
         }
 
@@ -87,7 +91,6 @@ Coroutine handleClient(SslContext* ctx, GHandle handle) {
         // 回显数据
         auto sendResult = co_await client.send(bytes.c_str(), bytes.size());
         if (!sendResult) {
-            std::cerr << "Send error: " << sendResult.error().message() << std::endl;
             break;
         }
     }
@@ -103,7 +106,6 @@ Coroutine sslEchoServer(IOSchedulerType* scheduler, SslContext* ctx, uint16_t po
     SslSocket listener(ctx);
 
     if (!listener.isValid()) {
-        std::cerr << "Failed to create socket" << std::endl;
         co_return;
     }
 
@@ -112,13 +114,13 @@ Coroutine sslEchoServer(IOSchedulerType* scheduler, SslContext* ctx, uint16_t po
 
     auto bindResult = listener.bind(Host(IPType::IPV4, "0.0.0.0", port));
     if (!bindResult) {
-        std::cerr << "Failed to bind: " << bindResult.error().message() << std::endl;
+        logErrno("bind failed");
         co_return;
     }
 
     auto listenResult = listener.listen(128);
     if (!listenResult) {
-        std::cerr << "Failed to listen: " << listenResult.error().message() << std::endl;
+        logErrno("listen failed");
         co_return;
     }
 
@@ -127,10 +129,14 @@ Coroutine sslEchoServer(IOSchedulerType* scheduler, SslContext* ctx, uint16_t po
     while (g_running) {
         Host clientHost;
         auto acceptResult = co_await listener.accept(&clientHost);
-        if (acceptResult) {
-            std::cout << "New connection from " << clientHost.ip()
-                      << ":" << clientHost.port() << std::endl;
-            scheduler->spawn(handleClient(ctx, acceptResult.value()));
+        if (!acceptResult) {
+            logErrno("accept failed");
+            continue;
+        }
+        std::cout << "New connection from " << clientHost.ip()
+                  << ":" << clientHost.port() << std::endl;
+        if (!scheduler->spawn(handleClient(ctx, acceptResult.value()))) {
+            std::cerr << "spawn failed for client handler" << std::endl;
         }
     }
 
@@ -140,8 +146,6 @@ Coroutine sslEchoServer(IOSchedulerType* scheduler, SslContext* ctx, uint16_t po
 
 int main(int argc, char* argv[]) {
     if (argc < 4) {
-        std::cerr << "Usage: " << argv[0] << " <port> <cert_file> <key_file>" << std::endl;
-        std::cerr << "Example: " << argv[0] << " 8443 certs/server.crt certs/server.key" << std::endl;
         return 1;
     }
 
@@ -157,19 +161,16 @@ int main(int argc, char* argv[]) {
     // 创建SSL上下文
     SslContext ctx(SslMethod::TLS_Server);
     if (!ctx.isValid()) {
-        std::cerr << "Failed to create SSL context" << std::endl;
         return 1;
     }
 
     auto certResult = ctx.loadCertificate(certFile);
     if (!certResult) {
-        std::cerr << "Failed to load certificate: " << certResult.error().message() << std::endl;
         return 1;
     }
 
     auto keyResult = ctx.loadPrivateKey(keyFile);
     if (!keyResult) {
-        std::cerr << "Failed to load private key: " << keyResult.error().message() << std::endl;
         return 1;
     }
 

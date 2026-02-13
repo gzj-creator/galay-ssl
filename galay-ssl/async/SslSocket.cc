@@ -13,6 +13,8 @@ SslSocket::SslSocket(SslContext* ctx, IPType type)
     , m_engine(ctx)
     , m_isServer(false)
     , m_engineInitialized(false)
+    , m_recvCipherBuffer()
+    , m_sendCipherBuffer()
 {
     int domain = (type == IPType::IPV4) ? AF_INET : AF_INET6;
     int fd = ::socket(domain, SOCK_STREAM, 0);
@@ -27,6 +29,8 @@ SslSocket::SslSocket(SslContext* ctx, GHandle handle)
     , m_engine(ctx)
     , m_isServer(true)
     , m_engineInitialized(false)
+    , m_recvCipherBuffer()
+    , m_sendCipherBuffer()
 {
     initEngine();
 }
@@ -42,6 +46,8 @@ SslSocket::SslSocket(SslSocket&& other) noexcept
     , m_engine(std::move(other.m_engine))
     , m_isServer(other.m_isServer)
     , m_engineInitialized(other.m_engineInitialized)
+    , m_recvCipherBuffer(std::move(other.m_recvCipherBuffer))
+    , m_sendCipherBuffer(std::move(other.m_sendCipherBuffer))
 {
     other.m_ctx = nullptr;
     other.m_engineInitialized = false;
@@ -55,6 +61,8 @@ SslSocket& SslSocket::operator=(SslSocket&& other) noexcept
         m_engine = std::move(other.m_engine);
         m_isServer = other.m_isServer;
         m_engineInitialized = other.m_engineInitialized;
+        m_recvCipherBuffer = std::move(other.m_recvCipherBuffer);
+        m_sendCipherBuffer = std::move(other.m_sendCipherBuffer);
 
         other.m_ctx = nullptr;
         other.m_engineInitialized = false;
@@ -136,12 +144,12 @@ SslHandshakeAwaitable SslSocket::handshake()
 
 SslRecvAwaitable SslSocket::recv(char* buffer, size_t length)
 {
-    return SslRecvAwaitable(&m_controller, &m_engine, buffer, length);
+    return SslRecvAwaitable(&m_controller, &m_engine, buffer, length, &m_recvCipherBuffer);
 }
 
 SslSendAwaitable SslSocket::send(const char* buffer, size_t length)
 {
-    return SslSendAwaitable(&m_controller, &m_engine, buffer, length);
+    return SslSendAwaitable(&m_controller, &m_engine, buffer, length, &m_sendCipherBuffer);
 }
 
 SslShutdownAwaitable SslSocket::shutdown()

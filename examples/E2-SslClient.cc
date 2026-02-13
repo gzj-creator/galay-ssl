@@ -39,7 +39,6 @@ Coroutine sslClient(SslContext* ctx, const std::string& host, uint16_t port) {
     SslSocket socket(ctx);
 
     if (!socket.isValid()) {
-        std::cerr << "Failed to create socket" << std::endl;
         co_return;
     }
 
@@ -51,7 +50,6 @@ Coroutine sslClient(SslContext* ctx, const std::string& host, uint16_t port) {
     // 连接服务器
     auto connectResult = co_await socket.connect(Host(IPType::IPV4, host, port));
     if (!connectResult) {
-        std::cerr << "Connect failed: " << connectResult.error().message() << std::endl;
         co_await socket.close();
         co_return;
     }
@@ -67,7 +65,6 @@ Coroutine sslClient(SslContext* ctx, const std::string& host, uint16_t port) {
                 err.code() == SslErrorCode::kHandshakeWantWrite) {
                 continue;
             }
-            std::cerr << "Handshake failed: " << err.message() << std::endl;
             co_await socket.close();
             co_return;
         }
@@ -82,7 +79,6 @@ Coroutine sslClient(SslContext* ctx, const std::string& host, uint16_t port) {
 
     auto sendResult = co_await socket.send(message.c_str(), message.size());
     if (!sendResult) {
-        std::cerr << "Send failed: " << sendResult.error().message() << std::endl;
         co_await socket.close();
         co_return;
     }
@@ -93,7 +89,6 @@ Coroutine sslClient(SslContext* ctx, const std::string& host, uint16_t port) {
     char buffer[4096];
     auto recvResult = co_await socket.recv(buffer, sizeof(buffer));
     if (!recvResult) {
-        std::cerr << "Recv failed: " << recvResult.error().message() << std::endl;
     } else {
         auto& bytes = recvResult.value();
         std::cout << "Received: " << bytes.toStringView() << std::endl;
@@ -107,8 +102,6 @@ Coroutine sslClient(SslContext* ctx, const std::string& host, uint16_t port) {
 
 int main(int argc, char* argv[]) {
     if (argc < 3) {
-        std::cerr << "Usage: " << argv[0] << " <host> <port> [ca_cert]" << std::endl;
-        std::cerr << "Example: " << argv[0] << " localhost 8443 certs/ca.crt" << std::endl;
         return 1;
     }
 
@@ -119,7 +112,6 @@ int main(int argc, char* argv[]) {
     // 创建SSL上下文
     SslContext ctx(SslMethod::TLS_Client);
     if (!ctx.isValid()) {
-        std::cerr << "Failed to create SSL context" << std::endl;
         return 1;
     }
 
@@ -127,7 +119,6 @@ int main(int argc, char* argv[]) {
     if (!caCert.empty()) {
         auto caResult = ctx.loadCACertificate(caCert);
         if (!caResult) {
-            std::cerr << "Failed to load CA certificate: " << caResult.error().message() << std::endl;
             return 1;
         }
         ctx.setVerifyMode(SslVerifyMode::Peer);

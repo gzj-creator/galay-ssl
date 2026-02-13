@@ -11,6 +11,7 @@
 #include <galay-kernel/kernel/IOScheduler.hpp>
 #include <galay-kernel/kernel/Awaitable.h>
 #include <expected>
+#include <vector>
 
 namespace galay::ssl
 {
@@ -289,6 +290,8 @@ private:
     SslEngine m_engine;         ///< SSL 引擎
     bool m_isServer;            ///< 是否为服务端模式
     bool m_engineInitialized;   ///< SSL 引擎是否已初始化
+    std::vector<char> m_recvCipherBuffer;
+    std::vector<char> m_sendCipherBuffer;
 };
 
 } // namespace galay::ssl

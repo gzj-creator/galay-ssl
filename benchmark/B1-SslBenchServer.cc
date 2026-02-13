@@ -9,6 +9,8 @@
 #include <iostream>
 #include <atomic>
 #include <csignal>
+#include <cerrno>
+#include <cstring>
 
 #ifdef USE_KQUEUE
 #include <galay-kernel/kernel/KqueueScheduler.h>
@@ -28,6 +30,10 @@ std::atomic<bool> g_running{true};
 std::atomic<uint64_t> g_connections{0};
 std::atomic<uint64_t> g_bytes_recv{0};
 std::atomic<uint64_t> g_bytes_sent{0};
+
+void logErrno(const char* prefix) {
+    std::cerr << prefix << ": errno=" << errno << " (" << std::strerror(errno) << ")" << std::endl;
+}
 
 void signalHandler(int) {
     g_running = false;
@@ -56,7 +62,7 @@ Coroutine handleClient(SslContext* ctx, GHandle handle) {
 
     g_connections++;
 
-    char buffer[4096];
+    char buffer[64 * 1024];
     while (g_running) {
         auto recvResult = co_await client.recv(buffer, sizeof(buffer));
         if (!recvResult) {
@@ -92,7 +98,6 @@ Coroutine sslServer(IOScheduler* scheduler, SslContext* ctx, uint16_t port) {
     SslSocket listener(ctx);
 
     if (!listener.isValid()) {
-        std::cerr << "Failed to create socket" << std::endl;
         co_return;
     }
 
@@ -101,13 +106,13 @@ Coroutine sslServer(IOScheduler* scheduler, SslContext* ctx, uint16_t port) {
 
     auto bindResult = listener.bind(Host(IPType::IPV4, "0.0.0.0", port));
     if (!bindResult) {
-        std::cerr << "Failed to bind" << std::endl;
+        logErrno("bind failed");
         co_return;
     }
 
     auto listenResult = listener.listen(1024);
     if (!listenResult) {
-        std::cerr << "Failed to listen" << std::endl;
+        logErrno("listen failed");
         co_return;
     }
 
@@ -116,8 +121,12 @@ Coroutine sslServer(IOScheduler* scheduler, SslContext* ctx, uint16_t port) {
     while (g_running) {
         Host clientHost;
         auto acceptResult = co_await listener.accept(&clientHost);
-        if (acceptResult) {
-            scheduler->spawn(handleClient(ctx, acceptResult.value()));
+        if (!acceptResult) {
+            logErrno("accept failed");
+            continue;
+        }
+        if (!scheduler->spawn(handleClient(ctx, acceptResult.value()))) {
+            std::cerr << "spawn failed for client handler" << std::endl;
         }
     }
 
@@ -126,7 +135,6 @@ Coroutine sslServer(IOScheduler* scheduler, SslContext* ctx, uint16_t port) {
 
 int main(int argc, char* argv[]) {
     if (argc < 4) {
-        std::cerr << "Usage: " << argv[0] << " <port> <cert_file> <key_file>" << std::endl;
         return 1;
     }
 
@@ -140,19 +148,16 @@ int main(int argc, char* argv[]) {
 
     SslContext ctx(SslMethod::TLS_Server);
     if (!ctx.isValid()) {
-        std::cerr << "Failed to create SSL context" << std::endl;
         return 1;
     }
 
     auto certResult = ctx.loadCertificate(certFile);
     if (!certResult) {
-        std::cerr << "Failed to load certificate" << std::endl;
         return 1;
     }
 
     auto keyResult = ctx.loadPrivateKey(keyFile);
     if (!keyResult) {
-        std::cerr << "Failed to load private key" << std::endl;
         return 1;
     }
 

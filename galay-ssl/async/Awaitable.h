@@ -30,7 +30,8 @@ using namespace galay::kernel;
  */
 struct SslRecvAwaitable : public RecvAwaitable {
     SslRecvAwaitable(IOController* controller, SslEngine* engine,
-                     char* buffer, size_t length);
+                     char* buffer, size_t length,
+                     std::vector<char>* cipherBuffer = nullptr);
 
 #ifdef USE_IOURING
     bool handleComplete(struct io_uring_cqe* cqe, GHandle handle) override;
@@ -44,7 +45,8 @@ struct SslRecvAwaitable : public RecvAwaitable {
     SslEngine* m_engine;
     char* m_plainBuffer;
     size_t m_plainLength;
-    std::vector<char> m_cipherBuffer;
+    std::vector<char>* m_cipherBuffer;
+    std::vector<char> m_cipherBufferOwned;
     std::expected<Bytes, SslError> m_sslResult;
     bool m_sslResultSet = false;
 };
@@ -59,7 +61,8 @@ struct SslRecvAwaitable : public RecvAwaitable {
  */
 struct SslSendAwaitable : public SendAwaitable {
     SslSendAwaitable(IOController* controller, SslEngine* engine,
-                     const char* buffer, size_t length);
+                     const char* buffer, size_t length,
+                     std::vector<char>* cipherBuffer = nullptr);
 
 #ifdef USE_IOURING
     bool handleComplete(struct io_uring_cqe* cqe, GHandle handle) override;
@@ -70,9 +73,12 @@ struct SslSendAwaitable : public SendAwaitable {
     bool await_suspend(std::coroutine_handle<> handle);
     std::expected<size_t, SslError> await_resume();
 
+    bool fillCipherChunk();
+
     SslEngine* m_engine;
     size_t m_plainLength;
-    std::vector<char> m_cipherBuffer;
+    std::vector<char>* m_cipherBuffer;
+    std::vector<char> m_cipherBufferOwned;
     size_t m_cipherLength = 0;
     std::expected<size_t, SslError> m_sslResult;
     bool m_sslResultSet = false;
