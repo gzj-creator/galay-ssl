@@ -89,7 +89,7 @@ Coroutine handleClient(SslContext* ctx, GHandle handle) {
         std::cout << "Received: " << bytes.toStringView() << std::endl;
 
         // 回显数据
-        auto sendResult = co_await client.send(bytes.c_str(), bytes.size());
+        auto sendResult = co_await client.send(reinterpret_cast<const char*>(bytes.data()), bytes.size());
         if (!sendResult) {
             break;
         }

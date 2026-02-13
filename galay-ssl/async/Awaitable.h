@@ -47,6 +47,8 @@ struct SslRecvAwaitable : public RecvAwaitable {
     size_t m_plainLength;
     std::vector<char>* m_cipherBuffer;
     std::vector<char> m_cipherBufferOwned;
+    size_t m_flushOffset = 0;
+    size_t m_flushLength = 0;
     std::expected<Bytes, SslError> m_sslResult;
     bool m_sslResultSet = false;
 };
@@ -74,8 +76,7 @@ struct SslSendAwaitable : public SendAwaitable {
     bool await_suspend(std::coroutine_handle<> handle);
     std::expected<size_t, SslError> await_resume();
 
-    bool fillCipherChunk();
-    bool fillIouringChunk();
+    bool fillNextSendChunk();
 
     SslEngine* m_engine;
     const char* m_plainBuffer;

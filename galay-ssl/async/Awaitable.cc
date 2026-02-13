@@ -129,35 +129,51 @@ bool SslRecvAwaitable::handleComplete(struct io_uring_cqe* cqe, GHandle handle)
 #else
 bool SslRecvAwaitable::handleComplete(GHandle handle)
 {
-    auto flushEncryptedOutput = [&]() -> bool {
+    auto flushEncryptedOutput = [&]() -> int {
         while (true) {
+            while (m_flushOffset < m_flushLength) {
+                auto sendResult = io::handleSend(handle,
+                                                 m_cipherBuffer->data() + m_flushOffset,
+                                                 m_flushLength - m_flushOffset);
+                if (!sendResult) {
+                    if (IOError::contains(sendResult.error().code(), kNotReady)) {
+                        return 0;
+                    }
+                    return -1;
+                }
+                size_t sent = sendResult.value();
+                if (sent == 0) {
+                    return 0;
+                }
+                m_flushOffset += sent;
+            }
+
+            m_flushOffset = 0;
+            m_flushLength = 0;
+
             size_t pending = m_engine->pendingEncryptedOutput();
             if (pending == 0) {
-                return true;
+                return 1;
             }
 
             size_t toRead = std::min(pending, m_cipherBuffer->size());
             int n = m_engine->extractEncryptedOutput(m_cipherBuffer->data(), toRead);
             if (n <= 0) {
-                return false;
+                return -1;
             }
-
-            const char* out = m_cipherBuffer->data();
-            size_t left = static_cast<size_t>(n);
-            while (left > 0) {
-                auto sendResult = io::handleSend(handle, out, left);
-                if (!sendResult) {
-                    return false;
-                }
-                size_t sent = sendResult.value();
-                if (sent == 0) {
-                    return false;
-                }
-                out += sent;
-                left -= sent;
-            }
+            m_flushLength = static_cast<size_t>(n);
         }
     };
+
+    const int preFlush = flushEncryptedOutput();
+    if (preFlush < 0) {
+        m_sslResult = std::unexpected(SslError::fromOpenSSL(SslErrorCode::kReadFailed));
+        m_sslResultSet = true;
+        return true;
+    }
+    if (preFlush == 0) {
+        return false;
+    }
 
     // NOTE: 某些调度器使用边沿触发（如 kqueue EV_CLEAR / epoll ET）。
     // 如果一次回调里不把 socket recv 到 EAGAIN，可能会“吃掉边沿”，导致后续没有事件，从而卡住。
@@ -195,14 +211,14 @@ bool SslRecvAwaitable::handleComplete(GHandle handle)
                 break;  // 需要更多密文，回到外层继续 raw recv
             }
             if (sslRet == SslIOResult::WantWrite) {
-                if (!flushEncryptedOutput()) {
-                    if (totalRead > 0) {
-                        m_sslResult = Bytes::fromString(std::string_view(m_plainBuffer, totalRead));
-                    } else {
-                        m_sslResult = std::unexpected(SslError::fromOpenSSL(SslErrorCode::kReadFailed));
-                    }
+                const int flushRet = flushEncryptedOutput();
+                if (flushRet < 0) {
+                    m_sslResult = std::unexpected(SslError::fromOpenSSL(SslErrorCode::kReadFailed));
                     m_sslResultSet = true;
                     return true;
+                }
+                if (flushRet == 0) {
+                    return false;
                 }
                 continue;
             }
@@ -314,71 +330,19 @@ SslSendAwaitable::SslSendAwaitable(IOController* controller, SslEngine* engine,
         return;
     }
 
-#ifdef USE_IOURING
-    if (!fillIouringChunk() && !m_sslResultSet) {
+    if (!fillNextSendChunk() && !m_sslResultSet) {
         m_sslResult = m_plainLength;
         m_sslResultSet = true;
     }
-#else
-
-    // SSL_write 加密明文到 wbio（循环直到全部写入）
-    size_t totalWritten = 0;
-    while (totalWritten < length) {
-        size_t bytesWritten = 0;
-        SslIOResult sslRet = m_engine->write(buffer + totalWritten, length - totalWritten, bytesWritten);
-
-        if (sslRet != SslIOResult::Success || bytesWritten == 0) {
-            m_sslResult = std::unexpected(SslError::fromOpenSSL(SslErrorCode::kWriteFailed));
-            m_sslResultSet = true;
-            return;
-        }
-
-        totalWritten += bytesWritten;
-    }
-
-    if (!fillCipherChunk()) {
-        if (!m_sslResultSet) {
-            m_sslResult = std::unexpected(SslError(SslErrorCode::kWriteFailed, 0));
-            m_sslResultSet = true;
-        }
-        return;
-    }
-#endif
 }
 
-bool SslSendAwaitable::fillCipherChunk()
-{
-    size_t pending = m_engine->pendingEncryptedOutput();
-    if (pending == 0) {
-        m_cipherLength = 0;
-        return false;
-    }
-
-    size_t desired = drainChunkSize(pending);
-    if (!ensureBufferSize(*m_cipherBuffer, desired)) {
-        m_sslResult = std::unexpected(SslError(SslErrorCode::kWriteFailed, 0));
-        m_sslResultSet = true;
-        return false;
-    }
-
-    size_t toRead = std::min(pending, m_cipherBuffer->size());
-    int n = m_engine->extractEncryptedOutput(m_cipherBuffer->data(), toRead);
-    if (n <= 0) {
-        m_sslResult = std::unexpected(SslError(SslErrorCode::kWriteFailed, 0));
-        m_sslResultSet = true;
-        return false;
-    }
-
-    m_cipherLength = static_cast<size_t>(n);
-    SendIOContext::m_buffer = m_cipherBuffer->data();
-    SendIOContext::m_length = m_cipherLength;
-    return true;
-}
-
-#ifdef USE_IOURING
-bool SslSendAwaitable::fillIouringChunk()
+bool SslSendAwaitable::fillNextSendChunk()
 {
     while (true) {
+        if (SendIOContext::m_length > 0) {
+            return true;
+        }
+
         size_t pending = m_engine->pendingEncryptedOutput();
         if (pending > 0) {
             size_t desired = drainChunkSize(pending);
@@ -404,6 +368,8 @@ bool SslSendAwaitable::fillIouringChunk()
 
         if (m_plainOffset >= m_plainLength) {
             m_cipherLength = 0;
+            SendIOContext::m_buffer = nullptr;
+            SendIOContext::m_length = 0;
             m_sslResult = m_plainLength;
             m_sslResultSet = true;
             return false;
@@ -425,10 +391,11 @@ bool SslSendAwaitable::fillIouringChunk()
 
         m_sslResult = std::unexpected(SslError::fromOpenSSL(SslErrorCode::kWriteFailed));
         m_sslResultSet = true;
+        SendIOContext::m_buffer = nullptr;
+        SendIOContext::m_length = 0;
         return false;
     }
 }
-#endif
 
 #ifdef USE_IOURING
 bool SslSendAwaitable::handleComplete(struct io_uring_cqe* cqe, GHandle handle)
@@ -459,7 +426,7 @@ bool SslSendAwaitable::handleComplete(struct io_uring_cqe* cqe, GHandle handle)
     SendIOContext::m_buffer += SendIOContext::m_length;
     SendIOContext::m_length = 0;
 
-    if (fillIouringChunk()) {
+    if (fillNextSendChunk()) {
         return false;
     }
 
@@ -493,7 +460,7 @@ bool SslSendAwaitable::handleComplete(GHandle handle)
             return true;
         }
 
-        if (!fillCipherChunk()) {
+        if (!fillNextSendChunk()) {
             if (m_sslResultSet) {
                 return true;
             }

@@ -43,6 +43,32 @@ std::atomic<uint64_t> g_send_fail{0};
 std::atomic<uint64_t> g_recv_fail{0};
 std::atomic<uint64_t> g_peer_closed{0};
 
+struct ThreadMetrics {
+    uint64_t requests = 0;
+    uint64_t bytes_sent = 0;
+    uint64_t bytes_recv = 0;
+    uint64_t errors = 0;
+    uint64_t connections_done = 0;
+    uint64_t connect_fail = 0;
+    uint64_t handshake_fail = 0;
+    uint64_t send_fail = 0;
+    uint64_t recv_fail = 0;
+    uint64_t peer_closed = 0;
+};
+
+void mergeThreadMetrics(const ThreadMetrics& m) {
+    g_requests.fetch_add(m.requests, std::memory_order_relaxed);
+    g_bytes_sent.fetch_add(m.bytes_sent, std::memory_order_relaxed);
+    g_bytes_recv.fetch_add(m.bytes_recv, std::memory_order_relaxed);
+    g_errors.fetch_add(m.errors, std::memory_order_relaxed);
+    g_connections_done.fetch_add(m.connections_done, std::memory_order_relaxed);
+    g_connect_fail.fetch_add(m.connect_fail, std::memory_order_relaxed);
+    g_handshake_fail.fetch_add(m.handshake_fail, std::memory_order_relaxed);
+    g_send_fail.fetch_add(m.send_fail, std::memory_order_relaxed);
+    g_recv_fail.fetch_add(m.recv_fail, std::memory_order_relaxed);
+    g_peer_closed.fetch_add(m.peer_closed, std::memory_order_relaxed);
+}
+
 void signalHandler(int) {
     g_running = false;
 }
@@ -50,12 +76,14 @@ void signalHandler(int) {
 Coroutine sslClient(SslContext* ctx,
                     const std::string& host, uint16_t port,
                     const std::string& message, int requestCount,
-                    std::atomic<int>* thread_done) {
+                    std::atomic<int>* thread_done,
+                    ThreadMetrics* metrics,
+                    bool statsEnabled) {
     SslSocket socket(ctx);
 
     if (!socket.isValid()) {
-        g_errors++;
-        g_connections_done++;
+        metrics->errors += 1;
+        metrics->connections_done += 1;
         if (thread_done) {
             (*thread_done)++;
         }
@@ -70,10 +98,10 @@ Coroutine sslClient(SslContext* ctx,
     // 连接
     auto connectResult = co_await socket.connect(Host(IPType::IPV4, host, port));
     if (!connectResult) {
-        g_errors++;
-        g_connect_fail++;
+        metrics->errors += 1;
+        metrics->connect_fail += 1;
         co_await socket.close();
-        g_connections_done++;
+        metrics->connections_done += 1;
         if (thread_done) {
             (*thread_done)++;
         }
@@ -91,10 +119,10 @@ Coroutine sslClient(SslContext* ctx,
                 continue;
             }
             // 其他错误则退出
-            g_errors++;
-            g_handshake_fail++;
+            metrics->errors += 1;
+            metrics->handshake_fail += 1;
             co_await socket.close();
-            g_connections_done++;
+            metrics->connections_done += 1;
             if (thread_done) {
                 (*thread_done)++;
             }
@@ -109,12 +137,14 @@ Coroutine sslClient(SslContext* ctx,
         // 发送
         auto sendResult = co_await socket.send(message.c_str(), message.size());
         if (!sendResult) {
-            g_errors++;
-            g_send_fail++;
+            metrics->errors += 1;
+            metrics->send_fail += 1;
             break;
         }
-        g_bytes_sent += sendResult.value();
-        bench::sslStatsAddSend(sendResult.value());
+        metrics->bytes_sent += sendResult.value();
+        if (statsEnabled) {
+            bench::sslStatsAddSend(sendResult.value());
+        }
 
         // 接收 - echo 是字节流，可能被拆包；按发送长度累计读满
         size_t remaining = message.size();
@@ -133,29 +163,31 @@ Coroutine sslClient(SslContext* ctx,
                     continue;
                 }
                 recvFailed = true;
-                g_recv_fail++;
+                metrics->recv_fail += 1;
                 break;
             }
             if (recvResult.value().size() == 0) {
                 recvFailed = true;
-                g_peer_closed++;
+                metrics->peer_closed += 1;
                 break;
             }
             const size_t received = recvResult.value().size();
-            g_bytes_recv += received;
-            bench::sslStatsAddRecv(received);
+            metrics->bytes_recv += received;
+            if (statsEnabled) {
+                bench::sslStatsAddRecv(received);
+            }
             remaining -= received;
         }
         if (recvFailed || remaining != 0) {
-            g_errors++;
+            metrics->errors += 1;
             break;
         }
-        g_requests++;
+        metrics->requests += 1;
     }
 
     co_await socket.shutdown();
     co_await socket.close();
-    g_connections_done++;
+    metrics->connections_done += 1;
     if (thread_done) {
         (*thread_done)++;
     }
@@ -163,20 +195,24 @@ Coroutine sslClient(SslContext* ctx,
 
 void runClientThread(const std::string& host, uint16_t port,
                      int connections, int requestsPerConn,
-                     size_t payloadBytes) {
+                     size_t payloadBytes, bool statsEnabled) {
+    ThreadMetrics metrics;
+
     // 创建 SSL 上下文
     SslContext ctx(SslMethod::TLS_Client);
     if (!ctx.isValid()) {
-        g_errors += connections;
-        g_connections_done += connections;
+        metrics.errors += static_cast<uint64_t>(connections);
+        metrics.connections_done += static_cast<uint64_t>(connections);
+        mergeThreadMetrics(metrics);
         return;
     }
 
     // 加载CA证书，即使不验证（用于建立信任链）
     auto caResult = ctx.loadCACertificate("certs/ca.crt");
     if (!caResult) {
-        g_errors += connections;
-        g_connections_done += connections;
+        metrics.errors += static_cast<uint64_t>(connections);
+        metrics.connections_done += static_cast<uint64_t>(connections);
+        mergeThreadMetrics(metrics);
         return;
     }
 
@@ -193,7 +229,7 @@ void runClientThread(const std::string& host, uint16_t port,
 
     // 启动客户端连接
     for (int i = 0; i < connections; i++) {
-        scheduler.spawn(sslClient(&ctx, host, port, message, requestsPerConn, &thread_done));
+        scheduler.spawn(sslClient(&ctx, host, port, message, requestsPerConn, &thread_done, &metrics, statsEnabled));
     }
 
     // 等待完成
@@ -202,6 +238,7 @@ void runClientThread(const std::string& host, uint16_t port,
     }
 
     scheduler.stop();
+    mergeThreadMetrics(metrics);
 }
 
 int main(int argc, char* argv[]) {
@@ -247,7 +284,7 @@ int main(int argc, char* argv[]) {
         if (conns == 0) {
             continue;
         }
-        workers.emplace_back(runClientThread, host, port, conns, requestsPerConn, payloadBytes);
+        workers.emplace_back(runClientThread, host, port, conns, requestsPerConn, payloadBytes, statsEnabled);
     }
 
     for (auto& t : workers) {
