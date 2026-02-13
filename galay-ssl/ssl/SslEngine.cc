@@ -201,6 +201,7 @@ SslIOResult SslEngine::write(const char* buffer, size_t length, size_t& bytesWri
     }
 
     bytesWritten = 0;
+    ERR_clear_error();
     int ret = SSL_write(m_ssl, buffer, static_cast<int>(length));
 
     if (ret > 0) {

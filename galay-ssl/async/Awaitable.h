@@ -56,8 +56,9 @@ struct SslRecvAwaitable : public RecvAwaitable {
 /**
  * @brief SSL 发送可等待对象（Memory BIO 模式）
  *
- * @details 继承 SendAwaitable，构造时先 SSL_write(明文) → BIO_read(wbio) 取密文，
- * 然后基类 m_buffer/m_length 指向密文 buffer，让调度器做 raw send。
+ * @details 继承 SendAwaitable：
+ * - 非 io_uring 路径：构造时先 SSL_write(明文) → BIO_read(wbio) 取密文，再做 raw send
+ * - io_uring 路径：按需增量 SSL_write + 分块 BIO_read，避免一次性累积全部密文
  */
 struct SslSendAwaitable : public SendAwaitable {
     SslSendAwaitable(IOController* controller, SslEngine* engine,
@@ -74,9 +75,12 @@ struct SslSendAwaitable : public SendAwaitable {
     std::expected<size_t, SslError> await_resume();
 
     bool fillCipherChunk();
+    bool fillIouringChunk();
 
     SslEngine* m_engine;
+    const char* m_plainBuffer;
     size_t m_plainLength;
+    size_t m_plainOffset = 0;
     std::vector<char>* m_cipherBuffer;
     std::vector<char> m_cipherBufferOwned;
     size_t m_cipherLength = 0;
