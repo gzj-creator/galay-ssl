@@ -11,6 +11,7 @@ file(GLOB_RECURSE HEADERS
 
 # 创建库目标
 add_library(galay-ssl ${SOURCES} ${HEADERS})
+target_compile_features(galay-ssl PUBLIC cxx_std_23)
 
 # 设置包含目录
 target_include_directories(galay-ssl
@@ -78,6 +79,7 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
     FILES_MATCHING
     PATTERN "*.h"
     PATTERN "*.hpp"
+    PATTERN "*.cppm"
     PATTERN "*.cc" EXCLUDE
 )
 

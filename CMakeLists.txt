@@ -12,13 +12,27 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # 构建选项
-option(BUILD_TESTS "Build test executables" ON)
-option(BUILD_BENCHMARKS "Build benchmark executables" ON)
-option(BUILD_EXAMPLES "Build example executables" ON)
-option(BUILD_SHARED_LIBS "Build shared library" ON)
-option(ENABLE_LOG "Enable logging with spdlog" ON)
-option(DISABLE_IOURING "Disable io_uring and use epoll on Linux" OFF)
-option(ENABLE_LTO "Enable IPO/LTO for Release builds" ON)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/option.cmake)
+
+# C++23 命名模块支持（参考 galay-rpc 规则）
+set(GALAY_SSL_MODULES_SUPPORTED FALSE)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
+    set(GALAY_SSL_MODULES_SUPPORTED TRUE)
+endif()
+
+if(BUILD_MODULE_EXAMPLES AND NOT GALAY_SSL_MODULES_SUPPORTED)
+    message(FATAL_ERROR "BUILD_MODULE_EXAMPLES requires CMake >= 3.28")
+endif()
+
+set(GALAY_SSL_MODULES_GENERATOR_SUPPORTED FALSE)
+if(CMAKE_GENERATOR MATCHES "Ninja" OR CMAKE_GENERATOR MATCHES "Visual Studio")
+    set(GALAY_SSL_MODULES_GENERATOR_SUPPORTED TRUE)
+endif()
+
+if(BUILD_MODULE_EXAMPLES AND NOT GALAY_SSL_MODULES_GENERATOR_SUPPORTED)
+    message(WARNING "Generator '${CMAKE_GENERATOR}' does not support C++ modules; disabling BUILD_MODULE_EXAMPLES.")
+    set(BUILD_MODULE_EXAMPLES OFF)
+endif()
 
 # 设置构建类型
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
@@ -107,6 +121,17 @@ endif()
 
 # 包含子目录
 add_subdirectory(galay-ssl)
+
+if(BUILD_MODULE_EXAMPLES AND GALAY_SSL_MODULES_SUPPORTED AND GALAY_SSL_MODULES_GENERATOR_SUPPORTED)
+    add_library(galay-ssl-modules STATIC)
+    target_link_libraries(galay-ssl-modules PUBLIC galay-ssl)
+    target_sources(galay-ssl-modules
+        PUBLIC
+            FILE_SET CXX_MODULES
+            FILES
+                "${CMAKE_CURRENT_SOURCE_DIR}/galay-ssl/module/galay.ssl.cppm"
+    )
+endif()
 
 if(BUILD_TESTS)
     add_subdirectory(test)

@@ -1,5 +1,5 @@
 /**
- * @file E1-SslEchoServer.cc
+ * @file include/E1-SslEchoServer.cc
  * @brief SSL Echo服务器示例
  * @details 演示如何使用SslSocket创建一个简单的SSL Echo服务器
  *
@@ -9,8 +9,8 @@
  *   - 作为HTTPS等SSL服务器的基础模板
  *
  * 运行方式：
- *   ./E1-SslEchoServer <port> <cert_file> <key_file>
- *   例如: ./E1-SslEchoServer 8443 certs/server.crt certs/server.key
+ *   ./E1-SslEchoServer-Include <port> <cert_file> <key_file>
+ *   例如: ./E1-SslEchoServer-Include 8443 certs/server.crt certs/server.key
  */
 
 #include <iostream>

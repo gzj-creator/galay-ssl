@@ -49,6 +49,13 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=ON -DDISABLE_IOURING
 cmake --build build -j
 ```
 
+如果要显式关闭模块接口（默认开启，工具链支持时生效）：
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=ON -DBUILD_MODULE_EXAMPLES=OFF
+cmake --build build -j
+```
+
 ## CMake 链接
 
 ```cmake
@@ -57,6 +64,27 @@ target_link_libraries(your_target PRIVATE galay-ssl::galay-ssl)
 ```
 
 如果是源码同仓构建（`add_subdirectory`），也可直接链接目标 `galay-ssl`。
+
+## C++23 Modules
+
+`galay-ssl` 现在支持 C++23 `import/export`（工具链支持时）：
+
+```cpp
+import galay.ssl;
+
+using namespace galay::ssl;
+```
+
+模块接口文件：`galay-ssl/module/galay.ssl.cppm`  
+传统 `#include` 用法仍完全可用。  
+说明：`BUILD_MODULE_EXAMPLES` 需要 CMake `>= 3.28` 且使用 `Ninja` / `Visual Studio` 生成器。`Unix Makefiles` 下会自动关闭。
+
+`examples/` 中也提供了模块化导入版本：
+
+- `examples/include/E1-SslEchoServer.cc`
+- `examples/include/E2-SslClient.cc`
+- `examples/import/E1-SslEchoServer.cc`
+- `examples/import/E2-SslClient.cc`
 
 ## 快速开始
 
@@ -158,8 +186,6 @@ Coroutine echoClient(SslContext* ctx)
 | [03-模块介绍](docs/03-模块介绍.md) | `SslContext` / `SslEngine` / `SslSocket` / Awaitable 模块说明 |
 | [04-运行原理](docs/04-运行原理.md) | Memory BIO 状态机、协程调度流程、资源生命周期 |
 | [05-性能分析](docs/05-性能分析.md) | 压测方法、关键指标、优化建议 |
-| [T1-SSL测试结果](docs/T1-SSL测试结果.md) | 历史测试记录（归档） |
-| [B1-SSL压测报告](docs/B1-SSL压测报告.md) | 历史压测明细（归档） |
 
 ## 许可证
 
