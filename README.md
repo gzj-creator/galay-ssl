@@ -1,281 +1,165 @@
 # galay-ssl
 
-基于 galay-kernel 的异步 SSL/TLS 库，提供协程友好的加密通信支持。
+基于 C++23 协程的异步 SSL/TLS 库，属于 galay 生态。
 
 ## 特性
 
-- 基于 OpenSSL 的 SSL/TLS 支持
-- 与 galay-kernel 无缝集成
-- C++20 协程支持
-- 支持服务端和客户端模式
-- 支持 TLS 1.2/1.3
-- 支持证书验证和 SNI
-- 支持 epoll 和 io_uring 两种 IO 后端
+- 异步 SSL Socket API（`SslSocket`），支持 `connect/handshake/recv/send/shutdown/close`
+- 基于 OpenSSL Memory BIO 的解耦实现（SSL 状态机与网络 IO 分离）
+- 支持 TLS 1.2 / TLS 1.3、SNI、ALPN、Session 复用
+- 统一 `std::expected` 风格错误返回（`SslError` / `IOError`）
+- 与 `galay-kernel` 协程调度器无缝集成
+- 支持 `kqueue`（macOS）、`epoll` / `io_uring`（Linux）
+
+## 文档导航
+
+建议按以下顺序阅读：
+
+1. [快速开始](docs/01-快速开始.md)
+2. [使用示例](docs/02-使用示例.md)
+3. [模块介绍](docs/03-模块介绍.md)
+4. [运行原理](docs/04-运行原理.md)
+5. [性能分析](docs/05-性能分析.md)
 
 ## 依赖
 
-- C++23 编译器 (GCC 13+, Clang 16+, MSVC 2022+)
+- C++23 编译器（GCC 13+ / Clang 16+）
 - CMake 3.16+
 - OpenSSL 1.1.1+
-- galay-kernel
+- `galay-kernel`
+- Linux 下启用 `io_uring` 时需要 `liburing`（缺失时自动回退 `epoll`）
 
-## 构建
-
-```bash
-mkdir build && cd build
-
-# 使用 io_uring (默认，需要 liburing)，统一 Release+LTO
-cmake .. -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=ON
-
-# 使用 epoll（同样保持 Release+LTO）
-cmake .. -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=ON -DDISABLE_IOURING=ON
-
-make -j$(nproc)
-```
-
-## 安装
+## 编译安装
 
 ```bash
-sudo make install
+git clone https://github.com/gzj-creator/galay-ssl.git
+cd galay-ssl
+
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=ON
+cmake --build build -j
+
+# 安装（可选）
+sudo cmake --install build
 ```
 
-## 性能测试
+Linux 强制使用 `epoll`：
 
-### 测试环境
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=ON -DDISABLE_IOURING=ON
+cmake --build build -j
+```
 
-#### Linux 环境 (x86_64)
+## CMake 链接
 
-| 项目 | 配置 |
-|------|------|
-| CPU | Intel Core i7-14700K |
-| CPU 核心数 | 8 |
-| 内存 | 7.7 GB |
-| 内核版本 | 6.8.0-90-generic |
-| GCC 版本 | 13.3.0 |
-| OpenSSL 版本 | 3.0.13 |
+```cmake
+find_package(galay-ssl REQUIRED)
+target_link_libraries(your_target PRIVATE galay-ssl::galay-ssl)
+```
 
-#### macOS 环境 (ARM64)
+如果是源码同仓构建（`add_subdirectory`），也可直接链接目标 `galay-ssl`。
 
-| 项目 | 配置 |
-|------|------|
-| CPU | Apple M4 |
-| CPU 核心数 | 10 |
-| 内存 | 24 GB |
-| 系统版本 | macOS 15.7.3 |
-| 内核版本 | 24.6.0 |
-| Clang 版本 | 17.0.0 |
-| OpenSSL 版本 | 3.5.0 |
-
-### 压测结果
-
-测试场景：SSL Echo 服务器，客户端发送 47 字节消息，服务器原样返回。
-
-#### Linux x86_64 - io_uring 后端
-
-| 测试场景 | 连接数 | 每连接请求数 | 总请求数 | 错误数 | 耗时 | QPS | 吞吐量 |
-|----------|--------|--------------|----------|--------|------|-----|--------|
-| 测试1 | 100 | 1000 | 100,000 | 0 | 14.88s | 6,722 | 0.60 MB/s |
-| 测试2 | 500 | 1000 | 500,000 | 0 | 88.42s | 5,655 | 0.51 MB/s |
-| 测试3 | 1000 | 500 | 500,000 | 0 | 93.62s | 5,341 | 0.48 MB/s |
-
-#### Linux x86_64 - epoll 后端
-
-| 测试场景 | 连接数 | 每连接请求数 | 总请求数 | 错误数 | 耗时 | QPS | 吞吐量 |
-|----------|--------|--------------|----------|--------|------|-----|--------|
-| 测试1 | 100 | 1000 | 100,000 | 0 | 15.17s | 6,593 | 0.59 MB/s |
-| 测试2 | 500 | 1000 | 500,000 | 0 | 88.71s | 5,636 | 0.51 MB/s |
-| 测试3 | 1000 | 500 | 500,000 | 0 | 93.85s | 5,328 | 0.48 MB/s |
-
-#### macOS ARM64 - kqueue 后端
-
-| 测试场景 | 连接数 | 每连接请求数 | 总请求数 | 错误数 | 耗时 | QPS | 吞吐量 |
-|----------|--------|--------------|----------|--------|------|-----|--------|
-| 测试1 | 100 | 1000 | 100,000 | 0 | 0.60s | 167,224 | 14.99 MB/s |
-| 测试2 | 500 | 1000 | 500,000 | 0 | 3.36s | 148,633 | 13.32 MB/s |
-| 测试3 | 1000 | 500 | 500,000 | 0 | 3.88s | 129,032 | 11.57 MB/s |
-
-#### 性能分析
-
-**Linux x86_64 平台 (Intel i7-14700K)**：
-- io_uring 和 epoll 性能接近，io_uring 略有优势（约 0.2%~2%）
-- SSL 加解密是主要瓶颈，IO 后端差异影响较小
-- QPS 约 5,000~6,700，吞吐量约 0.48~0.60 MB/s
-
-**macOS ARM64 平台 (Apple M4)**：
-- QPS 达到 129,000~167,000
-- 吞吐量达到 11.57~14.99 MB/s
-- 性能显著高于 Linux 测试环境
-
-**注意事项**：
-- 两个测试环境配置差异较大（CPU型号、核心数、内存、操作系统均不同）
-- 性能差异可能来自多个因素：CPU性能、硬件加密加速、操作系统优化、OpenSSL版本等
-- 不应简单归因于 ARM64 vs x86_64 架构差异
-- 建议在相同或相近配置下进行对比测试以获得更准确的结论
-
-**结论**：
-1. 在 SSL 场景下，不同 IO 后端（io_uring/epoll/kqueue）性能差异较小
-2. galay-ssl 在不同平台上均表现出良好的性能和稳定性
-3. 实际性能受多种因素影响，建议根据实际部署环境进行测试
-
-## 使用示例
-
-### SSL 服务端
+## 快速开始
 
 ```cpp
 #include "galay-ssl/async/SslSocket.h"
-#include "galay-kernel/kernel/EpollScheduler.h"  // 或 IOUringScheduler
+#include "galay-ssl/ssl/SslContext.h"
+#include <galay-kernel/kernel/Coroutine.h>
+
+#ifdef USE_KQUEUE
+#include <galay-kernel/kernel/KqueueScheduler.h>
+using IOSchedulerType = galay::kernel::KqueueScheduler;
+#elif defined(USE_EPOLL)
+#include <galay-kernel/kernel/EpollScheduler.h>
+using IOSchedulerType = galay::kernel::EpollScheduler;
+#elif defined(USE_IOURING)
+#include <galay-kernel/kernel/IOUringScheduler.h>
+using IOSchedulerType = galay::kernel::IOUringScheduler;
+#endif
 
 using namespace galay::ssl;
 using namespace galay::kernel;
 
-Coroutine handleClient(SslContext* ctx, GHandle handle) {
-    SslSocket client(ctx, handle);
-    client.option().handleNonBlock();
+Coroutine echoClient(SslContext* ctx)
+{
+    SslSocket sock(ctx);
+    sock.option().handleNonBlock();
+    sock.setHostname("127.0.0.1");
 
-    // SSL 握手 - 需要循环直到完成
-    while (!client.isHandshakeCompleted()) {
-        auto result = co_await client.handshake();
-        if (!result) {
-            auto& err = result.error();
-            if (err.code() == SslErrorCode::kHandshakeWantRead ||
-                err.code() == SslErrorCode::kHandshakeWantWrite) {
-                continue;
-            }
-            co_await client.close();
+    auto conn = co_await sock.connect(Host(IPType::IPV4, "127.0.0.1", 8443));
+    if (!conn) co_return;
+
+    while (!sock.isHandshakeCompleted()) {
+        auto hs = co_await sock.handshake();
+        if (!hs) {
+            co_await sock.close();
             co_return;
         }
-        break;
     }
 
-    // 接收数据 - 需要处理 WANT_READ/WANT_WRITE
-    char buffer[4096];
-    while (true) {
-        auto recvResult = co_await client.recv(buffer, sizeof(buffer));
-        if (!recvResult) {
-            auto& err = recvResult.error();
-            if (err.sslError() == SSL_ERROR_WANT_READ ||
-                err.sslError() == SSL_ERROR_WANT_WRITE) {
-                continue;
-            }
-            break;
-        }
-        if (recvResult.value().size() == 0) break;
-
-        // Echo 回去
-        co_await client.send(recvResult.value().c_str(), recvResult.value().size());
+    const char* msg = "hello";
+    auto s = co_await sock.send(msg, 5);
+    if (!s) {
+        co_await sock.close();
+        co_return;
     }
 
-    co_await client.shutdown();
-    co_await client.close();
-}
-
-Coroutine sslServer(IOScheduler* scheduler, SslContext* ctx, uint16_t port) {
-    SslSocket listener(ctx);
-    listener.option().handleReuseAddr();
-    listener.option().handleNonBlock();
-    listener.bind(Host(IPType::IPV4, "0.0.0.0", port));
-    listener.listen(1024);
-
-    while (true) {
-        Host clientHost;
-        auto result = co_await listener.accept(&clientHost);
-        if (result) {
-            scheduler->spawn(handleClient(ctx, result.value()));
-        }
+    char buf[256];
+    auto r = co_await sock.recv(buf, sizeof(buf));
+    if (r && r.value().size() > 0) {
+        // 处理 echo 数据
     }
-}
 
-int main() {
-    SslContext ctx(SslMethod::TLS_Server);
-    ctx.loadCertificate("server.crt");
-    ctx.loadPrivateKey("server.key");
-
-    EpollScheduler scheduler;  // 或 IOUringScheduler
-    scheduler.start();
-    scheduler.spawn(sslServer(&scheduler, &ctx, 8443));
-
-    // 等待...
-    scheduler.stop();
-    return 0;
+    co_await sock.shutdown();
+    co_await sock.close();
 }
 ```
 
-### SSL 客户端
+## 运行测试与压测
 
-```cpp
-Coroutine sslClient(SslContext* ctx, const std::string& host, uint16_t port) {
-    SslSocket socket(ctx);
-    socket.option().handleNonBlock();
-    socket.setHostname(host);  // SNI
+```bash
+# 构建 + 测试
+./scripts/run.sh build
+./scripts/run.sh test
 
-    // 连接
-    auto connectResult = co_await socket.connect(Host(IPType::IPV4, host, port));
-    if (!connectResult) co_return;
+# 压测
+./scripts/run.sh bench
 
-    // SSL 握手
-    while (!socket.isHandshakeCompleted()) {
-        auto result = co_await socket.handshake();
-        if (!result) {
-            auto& err = result.error();
-            if (err.code() == SslErrorCode::kHandshakeWantRead ||
-                err.code() == SslErrorCode::kHandshakeWantWrite) {
-                continue;
-            }
-            co_await socket.close();
-            co_return;
-        }
-        break;
-    }
-
-    // 发送数据
-    const char* msg = "Hello, SSL!";
-    co_await socket.send(msg, strlen(msg));
-
-    // 接收响应
-    char buffer[4096];
-    while (true) {
-        auto recvResult = co_await socket.recv(buffer, sizeof(buffer));
-        if (!recvResult) {
-            if (recvResult.error().sslError() == SSL_ERROR_WANT_READ ||
-                recvResult.error().sslError() == SSL_ERROR_WANT_WRITE) {
-                continue;
-            }
-            break;
-        }
-        // 处理数据...
-        break;
-    }
-
-    co_await socket.shutdown();
-    co_await socket.close();
-}
+# 结果检查
+./scripts/check.sh
 ```
 
-## 目录结构
+也可以直接运行：
 
+```bash
+./build/bin/T1-SslSocketTest
+./build/bin/B1-SslBenchServer 8443 certs/server.crt certs/server.key
+./build/bin/B1-SslBenchClient 127.0.0.1 8443 200 500 47 4
 ```
-galay-ssl/
-├── CMakeLists.txt
-├── README.md
-├── galay-ssl-config.cmake.in
-├── galay-ssl/
-│   ├── CMakeLists.txt
-│   ├── common/
-│   │   ├── Defn.hpp          # SSL 相关定义
-│   │   └── Error.h/cc        # SSL 错误处理
-│   ├── ssl/
-│   │   ├── SslContext.h/cc   # SSL 上下文管理
-│   │   └── SslEngine.h/cc    # SSL 引擎封装
-│   └── async/
-│       ├── SslSocket.h/cc    # 异步 SSL Socket
-│       └── Awaitable.h/cc    # SSL 可等待对象
-├── test/
-│   └── T1-SslSocketTest.cc   # 单元测试
-├── benchmark/
-│   ├── B1-SslBenchServer.cc  # 压测服务器
-│   └── B1-SslBenchClient.cc  # 压测客户端
-└── certs/                    # 测试证书
-```
+
+## 性能摘要
+
+以下数据来自仓库内最新 5 轮串行复测基线（本地环回，Release + LTO，记录日期：2026-02-13）：
+
+| 场景 | 参数 | 平均结果 |
+|------|------|----------|
+| 小包 QPS | `200 500 payload=47B threads=4` | 162,234 req/s |
+| 大包吞吐 | `10 200 payload=64KiB threads=1` | 1,981.10 MB/s |
+
+详细口径与历史对照见 [docs/05-性能分析.md](docs/05-性能分析.md)。
+
+## 文档
+
+详细文档见 [docs/](docs/)：
+
+| 文档 | 说明 |
+|------|------|
+| [01-快速开始](docs/01-快速开始.md) | 依赖、编译、最小可运行示例、错误处理 |
+| [02-使用示例](docs/02-使用示例.md) | 服务端/客户端、证书验证、会话复用、超时示例 |
+| [03-模块介绍](docs/03-模块介绍.md) | `SslContext` / `SslEngine` / `SslSocket` / Awaitable 模块说明 |
+| [04-运行原理](docs/04-运行原理.md) | Memory BIO 状态机、协程调度流程、资源生命周期 |
+| [05-性能分析](docs/05-性能分析.md) | 压测方法、关键指标、优化建议 |
+| [T1-SSL测试结果](docs/T1-SSL测试结果.md) | 历史测试记录（归档） |
+| [B1-SSL压测报告](docs/B1-SSL压测报告.md) | 历史压测明细（归档） |
 
 ## 许可证
 

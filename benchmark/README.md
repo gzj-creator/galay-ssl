@@ -1,102 +1,97 @@
 # galay-ssl 性能测试
 
-本目录包含galay-ssl库的性能测试程序，用于评估SSL/TLS通信的吞吐量和并发性能。
+本目录包含 `galay-ssl` 的压测程序，用于评估 SSL/TLS Echo 场景的 QPS、吞吐量和错误率。
 
 ## 测试程序
 
 ### B1-SslBenchServer
 
-SSL服务端性能测试程序，模拟echo服务器。
+SSL Echo 服务端。
 
-**用法：**
 ```bash
-./build/bin/B1-SslBenchServer <port> <cert_file> <key_file>
+./build/bin/B1-SslBenchServer <port> <cert_file> <key_file> [backlog]
 ```
 
-**参数：**
-- `port`: 监听端口
-- `cert_file`: SSL证书文件路径
-- `key_file`: SSL私钥文件路径
+参数：
 
-**示例：**
+- `port`：监听端口
+- `cert_file`：证书路径
+- `key_file`：私钥路径
+- `backlog`：可选，默认 `4096`
+
+示例：
+
 ```bash
 ./build/bin/B1-SslBenchServer 8443 certs/server.crt certs/server.key
 ```
 
 ### B1-SslBenchClient
 
-SSL客户端性能测试程序，模拟多个并发连接。
+SSL 压测客户端。
 
-**用法：**
 ```bash
-./build/bin/B1-SslBenchClient <host> <port> <connections> <requests_per_conn> [payload_bytes] [threads]
+./build/bin/B1-SslBenchClient <host> <port> <connections> <requests_per_conn> [payload_bytes] [threads] [connect_retries]
 ```
 
-**参数：**
-- `host`: 服务端主机名或IP地址
-- `port`: 服务端端口
-- `connections`: 并发连接数
-- `requests_per_conn`: 每个连接的请求数
-- `payload_bytes`: 可选，单次请求发送的 payload 大小（字节）。默认 47 字节（与历史报告一致）。
-- `threads`: 可选，客户端压测线程数（默认 1）。
+参数：
 
-**示例：**
+- `host`：服务端地址
+- `port`：服务端端口
+- `connections`：并发连接数
+- `requests_per_conn`：每连接请求数
+- `payload_bytes`：可选，单次 payload 大小，默认 `47`
+- `threads`：可选，客户端线程数，默认 `1`
+- `connect_retries`：可选，连接重试次数，默认 `3`
+
+示例：
+
 ```bash
-# 默认 47 字节 payload
-./build/bin/B1-SslBenchClient 127.0.0.1 8443 100 1000
+# 小包（默认 47B）
+./build/bin/B1-SslBenchClient 127.0.0.1 8443 200 500 47 4
 
-# 64KiB 大包压测
-./build/bin/B1-SslBenchClient 127.0.0.1 8443 50 200 65536 4
+# 大包（64KiB）
+./build/bin/B1-SslBenchClient 127.0.0.1 8443 10 200 65536 1
 ```
 
-## 运行完整测试
+## 推荐流程
 
-1. 生成测试证书（如果还没有生成）：
 ```bash
+# 1) 生成证书（如需要）
 bash test/certs/generate_certs.sh
+
+# 2) 启动服务端
+./build/bin/B1-SslBenchServer 8443 certs/server.crt certs/server.key
+
+# 3) 启动客户端（另一个终端）
+./build/bin/B1-SslBenchClient 127.0.0.1 8443 200 500 47 4
 ```
 
-2. 启动服务端：
-```bash
-./build/bin/B1-SslBenchServer 8443 test/certs/server.crt test/certs/server.key
-```
+## 输出指标
 
-3. 在另一个终端启动客户端：
-```bash
-./build/bin/B1-SslBenchClient 127.0.0.1 8443 50 100
-```
+客户端输出：
 
-历史对照数据（OpenSSL + libevent）已迁移到 `docs/B1-SSL压测报告.md`，
-当前仓库仅保留 `B1-SslBenchServer/B1-SslBenchClient` 压测程序。
+- `Total requests`
+- `Total errors`
+- `Error breakdown`（仅当错误 > 0）
+- `Total bytes sent/received`
+- `Duration`
+- `Requests/sec`
+- `Throughput`
 
-## 性能指标
+可选统计（仅 benchmark 侧）：
 
-客户端程序会输出以下性能指标：
-- 总连接数
-- 每个连接的请求数
-- 总请求数
-- 总错误数
-- 发送/接收字节数
-- 测试持续时间
-- QPS (每秒请求数)
-- 吞吐量 (MB/s)
-
-可选统计（仅 benchmark 侧，不进入核心库代码路径）：
 ```bash
 GALAY_SSL_STATS=1 ./build/bin/B1-SslBenchClient 127.0.0.1 8443 50 200 47 4
 ```
-会额外输出：
-- Send ops / send plain bytes
-- Recv ops / recv plain bytes / recv chunks
-- Avg recv chunk bytes
 
-服务端程序会实时显示：
-- 当前连接数
-- 累计接收/发送字节数
+会额外输出：
+
+- `Send ops / send plain bytes`
+- `Recv ops / recv plain bytes / recv chunks`
+- `Avg recv chunk bytes`
 
 ## 注意事项
 
-- 测试使用自签名证书，客户端默认跳过证书验证
-- 服务端支持多个并发连接
-- 客户端按请求粒度发送固定大小 payload（可通过 `payload_bytes` 调整），并会把 echo 读满该长度后再计为一次请求完成
-- 程序使用SIGINT/SIGTERM进行优雅关闭
+- 测试证书为自签名，默认用于开发/测试
+- 客户端默认 `SslVerifyMode::None`（压测口径），不是生产安全配置
+- 建议统一使用 `Release + LTO`，避免构建口径造成数据偏差
