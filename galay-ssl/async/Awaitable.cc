@@ -52,37 +52,88 @@ static size_t drainChunkSize(size_t pending)
 SslRecvAwaitable::SslRecvAwaitable(IOController* controller, SslEngine* engine,
                                    char* buffer, size_t length,
                                    std::vector<char>* cipherBuffer)
-    : RecvAwaitable(controller, nullptr, 0)  // 基类 buffer 稍后指向 m_cipherBuffer
+    : CustomAwaitable(controller)
     , m_engine(engine)
     , m_plainBuffer(buffer)
     , m_plainLength(length)
     , m_cipherBuffer(cipherBuffer ? cipherBuffer : &m_cipherBufferOwned)
     , m_cipherBufferOwned()
+    , m_recvCtx(nullptr, 0, this)
+    , m_sendCtx(this)
 {
     if (m_cipherBuffer->size() < kCipherBufSize) {
         m_cipherBuffer->resize(kCipherBufSize);
     }
-    // 让基类的 raw recv 读到内部密文 buffer
-    RecvIOContext::m_buffer = m_cipherBuffer->data();
-    RecvIOContext::m_length = m_cipherBuffer->size();
+    m_tasks.reserve(4);
+    resetTaskQueue();
 }
 
-#ifdef USE_IOURING
-bool SslRecvAwaitable::handleComplete(struct io_uring_cqe* cqe, GHandle handle)
+SslRecvAwaitable::SslRecvAwaitable(SslRecvAwaitable&& other) noexcept
+    : CustomAwaitable(other.m_controller)
+    , m_engine(other.m_engine)
+    , m_plainBuffer(other.m_plainBuffer)
+    , m_plainLength(other.m_plainLength)
+    , m_cipherBuffer(nullptr)
+    , m_cipherBufferOwned(std::move(other.m_cipherBufferOwned))
+    , m_sslResult(std::move(other.m_sslResult))
+    , m_sslResultSet(other.m_sslResultSet)
+    , m_recvCtx(nullptr, 0, this)
+    , m_sendCtx(this)
 {
-    auto result = io::handleRecv(cqe, RecvIOContext::m_buffer);
-    if (!result && IOError::contains(result.error().code(), kNotReady)) {
-        return false;
+    if (other.m_cipherBuffer == &other.m_cipherBufferOwned) {
+        m_cipherBuffer = &m_cipherBufferOwned;
+    } else {
+        m_cipherBuffer = other.m_cipherBuffer;
     }
-    if (!result) {
-        m_sslResult = std::unexpected(SslError(SslErrorCode::kReadFailed, 0));
-        m_sslResultSet = true;
-        return true;
+    m_tasks.reserve(4);
+    resetTaskQueue();
+}
+
+SslRecvAwaitable& SslRecvAwaitable::operator=(SslRecvAwaitable&& other) noexcept
+{
+    if (this == &other) {
+        return *this;
     }
 
-    auto& bytes = result.value();
-    m_engine->feedEncryptedInput(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    m_controller = other.m_controller;
+    m_waker = Waker();
+    m_engine = other.m_engine;
+    m_plainBuffer = other.m_plainBuffer;
+    m_plainLength = other.m_plainLength;
+    m_cipherBufferOwned = std::move(other.m_cipherBufferOwned);
+    if (other.m_cipherBuffer == &other.m_cipherBufferOwned) {
+        m_cipherBuffer = &m_cipherBufferOwned;
+    } else {
+        m_cipherBuffer = other.m_cipherBuffer;
+    }
+    m_sslResult = std::move(other.m_sslResult);
+    m_sslResultSet = other.m_sslResultSet;
+    m_recvCtx.m_owner = this;
+    m_sendCtx.m_owner = this;
+    resetTaskQueue();
+    return *this;
+}
 
+void SslRecvAwaitable::resetTaskQueue()
+{
+    syncRecvBuffer();
+    m_sendCtx.m_buffer = nullptr;
+    m_sendCtx.m_length = 0;
+    m_tasks.clear();
+    m_cursor = 0;
+    if (!m_sslResultSet) {
+        addTask(IOEventType::RECV, &m_recvCtx);
+    }
+}
+
+void SslRecvAwaitable::syncRecvBuffer()
+{
+    m_recvCtx.m_buffer = m_cipherBuffer->data();
+    m_recvCtx.m_length = m_cipherBuffer->size();
+}
+
+SslRecvAwaitable::ReadAction SslRecvAwaitable::drainPlaintext()
+{
     size_t totalRead = 0;
     while (totalRead < m_plainLength) {
         size_t bytesRead = 0;
@@ -99,6 +150,15 @@ bool SslRecvAwaitable::handleComplete(struct io_uring_cqe* cqe, GHandle handle)
             break;
         }
 
+        if (sslRet == SslIOResult::WantWrite) {
+            if (totalRead > 0) {
+                m_sslResult = Bytes::fromString(std::string_view(m_plainBuffer, totalRead));
+                m_sslResultSet = true;
+                return ReadAction::Completed;
+            }
+            return ReadAction::NeedSend;
+        }
+
         if (sslRet == SslIOResult::ZeroReturn) {
             if (totalRead > 0) {
                 m_sslResult = Bytes::fromString(std::string_view(m_plainBuffer, totalRead));
@@ -106,7 +166,7 @@ bool SslRecvAwaitable::handleComplete(struct io_uring_cqe* cqe, GHandle handle)
                 m_sslResult = Bytes();
             }
             m_sslResultSet = true;
-            return true;
+            return ReadAction::Completed;
         }
 
         if (totalRead > 0) {
@@ -115,195 +175,236 @@ bool SslRecvAwaitable::handleComplete(struct io_uring_cqe* cqe, GHandle handle)
             m_sslResult = std::unexpected(SslError::fromOpenSSL(SslErrorCode::kReadFailed));
         }
         m_sslResultSet = true;
-        return true;
+        return ReadAction::Completed;
     }
 
     if (totalRead > 0) {
         m_sslResult = Bytes::fromString(std::string_view(m_plainBuffer, totalRead));
         m_sslResultSet = true;
-        return true;
+        return ReadAction::Completed;
     }
 
-    return false;
+    return ReadAction::NeedRecv;
 }
-#else
-bool SslRecvAwaitable::handleComplete(GHandle handle)
+
+SslRecvAwaitable::SendChunkState SslRecvAwaitable::prepareSendChunk()
 {
-    auto flushEncryptedOutput = [&]() -> int {
-        while (true) {
-            while (m_flushOffset < m_flushLength) {
-                auto sendResult = io::handleSend(handle,
-                                                 m_cipherBuffer->data() + m_flushOffset,
-                                                 m_flushLength - m_flushOffset);
-                if (!sendResult) {
-                    if (IOError::contains(sendResult.error().code(), kNotReady)) {
-                        return 0;
-                    }
-                    return -1;
-                }
-                size_t sent = sendResult.value();
-                if (sent == 0) {
-                    return 0;
-                }
-                m_flushOffset += sent;
-            }
+    if (m_sendCtx.m_length > 0) {
+        return SendChunkState::Ready;
+    }
 
-            m_flushOffset = 0;
-            m_flushLength = 0;
+    size_t pending = m_engine->pendingEncryptedOutput();
+    if (pending == 0) {
+        return SendChunkState::Drained;
+    }
 
-            size_t pending = m_engine->pendingEncryptedOutput();
-            if (pending == 0) {
-                return 1;
-            }
+    size_t desired = drainChunkSize(pending);
+    if (!ensureBufferSize(*m_cipherBuffer, desired)) {
+        m_sslResult = std::unexpected(SslError(SslErrorCode::kReadFailed, 0));
+        m_sslResultSet = true;
+        return SendChunkState::Failed;
+    }
 
-            size_t toRead = std::min(pending, m_cipherBuffer->size());
-            int n = m_engine->extractEncryptedOutput(m_cipherBuffer->data(), toRead);
-            if (n <= 0) {
-                return -1;
-            }
-            m_flushLength = static_cast<size_t>(n);
-        }
-    };
+    syncRecvBuffer();
 
-    const int preFlush = flushEncryptedOutput();
-    if (preFlush < 0) {
-        m_sslResult = std::unexpected(SslError::fromOpenSSL(SslErrorCode::kReadFailed));
+    size_t toRead = std::min(pending, m_cipherBuffer->size());
+    int n = m_engine->extractEncryptedOutput(m_cipherBuffer->data(), toRead);
+    if (n <= 0) {
+        m_sslResult = std::unexpected(SslError(SslErrorCode::kReadFailed, 0));
+        m_sslResultSet = true;
+        return SendChunkState::Failed;
+    }
+
+    m_sendCtx.m_buffer = m_cipherBuffer->data();
+    m_sendCtx.m_length = static_cast<size_t>(n);
+    return SendChunkState::Ready;
+}
+
+bool SslRecvAwaitable::scheduleSendThenRecv()
+{
+    SendChunkState state = prepareSendChunk();
+    if (state == SendChunkState::Failed) {
+        return true;
+    }
+    if (state == SendChunkState::Drained) {
+        m_sslResult = std::unexpected(SslError(SslErrorCode::kReadFailed, 0));
         m_sslResultSet = true;
         return true;
     }
-    if (preFlush == 0) {
+
+    addTask(IOEventType::SEND, &m_sendCtx);
+    addTask(IOEventType::RECV, &m_recvCtx);
+    return true;
+}
+
+// --- RecvCtx ---
+
+#ifdef USE_IOURING
+bool SslRecvAwaitable::RecvCtx::handleComplete(struct io_uring_cqe* cqe, GHandle handle)
+{
+    (void)handle;
+    if (cqe == nullptr) {
+        auto preAction = m_owner->drainPlaintext();
+        if (preAction == SslRecvAwaitable::ReadAction::Completed) {
+            return true;
+        }
+        if (preAction == SslRecvAwaitable::ReadAction::NeedSend) {
+            return m_owner->scheduleSendThenRecv();
+        }
         return false;
     }
 
-    // NOTE: 某些调度器使用边沿触发（如 kqueue EV_CLEAR / epoll ET）。
-    // 如果一次回调里不把 socket recv 到 EAGAIN，可能会“吃掉边沿”，导致后续没有事件，从而卡住。
+    auto result = io::handleRecv(cqe, m_buffer);
+    if (!result && IOError::contains(result.error().code(), kNotReady)) {
+        return false;
+    }
+    if (!result) {
+        if (IOError::contains(result.error().code(), kDisconnectError)) {
+            m_owner->m_sslResult = Bytes();
+        } else {
+            m_owner->m_sslResult = std::unexpected(SslError(SslErrorCode::kReadFailed, 0));
+        }
+        m_owner->m_sslResultSet = true;
+        return true;
+    }
+
+    auto& bytes = result.value();
+    m_owner->m_engine->feedEncryptedInput(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+
+    auto action = m_owner->drainPlaintext();
+    if (action == SslRecvAwaitable::ReadAction::Completed) {
+        return true;
+    }
+    if (action == SslRecvAwaitable::ReadAction::NeedSend) {
+        return m_owner->scheduleSendThenRecv();
+    }
+    return false;
+}
+#else
+bool SslRecvAwaitable::RecvCtx::handleComplete(GHandle handle)
+{
+    auto preAction = m_owner->drainPlaintext();
+    if (preAction == SslRecvAwaitable::ReadAction::Completed) {
+        return true;
+    }
+    if (preAction == SslRecvAwaitable::ReadAction::NeedSend) {
+        return m_owner->scheduleSendThenRecv();
+    }
+
+    // ET 模式下尽量读到 EAGAIN，避免“吃掉边沿”导致卡住。
     while (true) {
-        auto result = io::handleRecv(handle, RecvIOContext::m_buffer, RecvIOContext::m_length);
+        auto result = io::handleRecv(handle, m_buffer, m_length);
         if (!result && IOError::contains(result.error().code(), kNotReady)) {
             return false;
         }
         if (!result) {
             if (IOError::contains(result.error().code(), kDisconnectError)) {
-                m_sslResult = Bytes();
+                m_owner->m_sslResult = Bytes();
             } else {
-                m_sslResult = std::unexpected(SslError(SslErrorCode::kReadFailed, 0));
+                m_owner->m_sslResult = std::unexpected(SslError(SslErrorCode::kReadFailed, 0));
             }
-            m_sslResultSet = true;
+            m_owner->m_sslResultSet = true;
             return true;
         }
 
         auto& bytes = result.value();
-        m_engine->feedEncryptedInput(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        m_owner->m_engine->feedEncryptedInput(reinterpret_cast<const char*>(bytes.data()), bytes.size());
 
-        // 尝试解密；如果仍 WantRead，则继续 raw recv 直到 EAGAIN
-        size_t totalRead = 0;
-        while (totalRead < m_plainLength) {
-            size_t bytesRead = 0;
-            SslIOResult sslRet = m_engine->read(m_plainBuffer + totalRead,
-                                                m_plainLength - totalRead,
-                                                bytesRead);
+        auto action = m_owner->drainPlaintext();
+        if (action == SslRecvAwaitable::ReadAction::Completed) {
+            return true;
+        }
+        if (action == SslRecvAwaitable::ReadAction::NeedSend) {
+            return m_owner->scheduleSendThenRecv();
+        }
+    }
+}
+#endif
 
-            if (sslRet == SslIOResult::Success && bytesRead > 0) {
-                totalRead += bytesRead;
-                continue;
-            }
-            if (sslRet == SslIOResult::WantRead) {
-                break;  // 需要更多密文，回到外层继续 raw recv
-            }
-            if (sslRet == SslIOResult::WantWrite) {
-                const int flushRet = flushEncryptedOutput();
-                if (flushRet < 0) {
-                    m_sslResult = std::unexpected(SslError::fromOpenSSL(SslErrorCode::kReadFailed));
-                    m_sslResultSet = true;
-                    return true;
-                }
-                if (flushRet == 0) {
-                    return false;
-                }
-                continue;
-            }
-            if (sslRet == SslIOResult::ZeroReturn) {
-                if (totalRead > 0) {
-                    m_sslResult = Bytes::fromString(std::string_view(m_plainBuffer, totalRead));
-                } else {
-                    m_sslResult = Bytes();
-                }
-                m_sslResultSet = true;
+// --- SendCtx ---
+
+#ifdef USE_IOURING
+bool SslRecvAwaitable::SendCtx::handleComplete(struct io_uring_cqe* cqe, GHandle handle)
+{
+    (void)handle;
+    if (cqe == nullptr) {
+        auto state = m_owner->prepareSendChunk();
+        return state != SslRecvAwaitable::SendChunkState::Ready;
+    }
+
+    auto result = io::handleSend(cqe);
+    if (!result && IOError::contains(result.error().code(), kNotReady)) {
+        return false;
+    }
+    if (!result) {
+        m_owner->m_sslResult = std::unexpected(SslError(SslErrorCode::kReadFailed, 0));
+        m_owner->m_sslResultSet = true;
+        return true;
+    }
+
+    size_t sent = result.value();
+    if (sent == 0) {
+        return false;
+    }
+
+    if (sent < m_length) {
+        m_buffer += sent;
+        m_length -= sent;
+        return false;
+    }
+
+    m_buffer += m_length;
+    m_length = 0;
+
+    auto state = m_owner->prepareSendChunk();
+    return state != SslRecvAwaitable::SendChunkState::Ready;
+}
+#else
+bool SslRecvAwaitable::SendCtx::handleComplete(GHandle handle)
+{
+    while (true) {
+        if (m_length == 0) {
+            auto state = m_owner->prepareSendChunk();
+            if (state == SslRecvAwaitable::SendChunkState::Ready) {
+                // 继续发送新块
+            } else {
                 return true;
             }
+        }
 
-            if (totalRead > 0) {
-                m_sslResult = Bytes::fromString(std::string_view(m_plainBuffer, totalRead));
-            } else {
-                m_sslResult = std::unexpected(SslError::fromOpenSSL(SslErrorCode::kReadFailed));
-            }
-            m_sslResultSet = true;
+        auto result = io::handleSend(handle, m_buffer, m_length);
+        if (!result && IOError::contains(result.error().code(), kNotReady)) {
+            return false;
+        }
+        if (!result) {
+            m_owner->m_sslResult = std::unexpected(SslError(SslErrorCode::kReadFailed, 0));
+            m_owner->m_sslResultSet = true;
             return true;
         }
 
-        if (totalRead > 0) {
-            m_sslResult = Bytes::fromString(std::string_view(m_plainBuffer, totalRead));
-            m_sslResultSet = true;
-            return true;
+        size_t sent = result.value();
+        if (sent == 0) {
+            return false;
         }
+
+        m_buffer += sent;
+        m_length -= sent;
     }
 }
 #endif
 
 bool SslRecvAwaitable::await_suspend(std::coroutine_handle<> handle)
 {
-    // 先尝试 SSL_read：握手阶段可能已经从网络读取了包含应用数据的密文并喂入了 BIO，
-    // 此时 SSL_pending() 返回 0（数据在 BIO 中尚未解密），但 SSL_read 可以解密它。
-    size_t totalRead = 0;
-    while (totalRead < m_plainLength) {
-        size_t bytesRead = 0;
-        SslIOResult sslRet = m_engine->read(m_plainBuffer + totalRead,
-                                            m_plainLength - totalRead,
-                                            bytesRead);
-        if (sslRet == SslIOResult::Success && bytesRead > 0) {
-            totalRead += bytesRead;
-            continue;
-        }
-        if (sslRet == SslIOResult::WantRead) {
-            break;
-        }
-        if (sslRet == SslIOResult::ZeroReturn) {
-            if (totalRead > 0) {
-                m_sslResult = Bytes::fromString(std::string_view(m_plainBuffer, totalRead));
-            } else {
-                m_sslResult = Bytes();
-            }
-            m_sslResultSet = true;
-            return false;
-        }
-
-        if (totalRead > 0) {
-            m_sslResult = Bytes::fromString(std::string_view(m_plainBuffer, totalRead));
-        } else {
-            m_sslResult = std::unexpected(SslError::fromOpenSSL(SslErrorCode::kReadFailed));
-        }
-        m_sslResultSet = true;
+    if (drainPlaintext() == ReadAction::Completed) {
         return false;
     }
 
-    if (totalRead > 0) {
-        m_sslResult = Bytes::fromString(std::string_view(m_plainBuffer, totalRead));
-        m_sslResultSet = true;
-        return false;
-    }
-
-    return RecvAwaitable::await_suspend(handle);
+    return CustomAwaitable::await_suspend(handle);
 }
 
 std::expected<Bytes, SslError> SslRecvAwaitable::await_resume()
 {
-    if (m_sslResultSet) {
-        m_controller->removeAwaitable(IOEventType::RECV);
-        return std::move(m_sslResult);
-    }
-
-    RecvAwaitable::await_resume();
-    m_controller->removeAwaitable(IOEventType::RECV);
+    onCompleted();
 
     if (m_sslResultSet) {
         return std::move(m_sslResult);

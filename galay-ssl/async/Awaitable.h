@@ -22,35 +22,79 @@ using namespace galay::kernel;
 /**
  * @brief SSL 接收可等待对象（Memory BIO 模式）
  *
- * @details 继承 RecvAwaitable，重写 handleComplete 实现：
- * recv 密文 → BIO_write(rbio) → SSL_read 解密 → 明文
- *
- * 基类的 m_buffer/m_length 指向内部密文 buffer（用于 raw recv），
- * 用户的明文 buffer 存在 m_plainBuffer/m_plainLength。
+ * @details 基于 CustomAwaitable + RecvCtx/SendCtx 状态机：
+ * - RECV：recv 密文 -> feed rbio -> SSL_read 解密
+ * - SEND：当 SSL_read 返回 WantWrite 时，发送 wbio 里的密文
+ * - 发送完成后自动回到 RECV
  */
-struct SslRecvAwaitable : public RecvAwaitable {
+struct SslRecvAwaitable : public CustomAwaitable,
+                          public TimeoutSupport<SslRecvAwaitable> {
+    struct RecvCtx : public RecvIOContext {
+        RecvCtx(char* buffer, size_t length, SslRecvAwaitable* owner)
+            : RecvIOContext(buffer, length), m_owner(owner) {}
+
+#ifdef USE_IOURING
+        bool handleComplete(struct io_uring_cqe* cqe, GHandle handle) override;
+#else
+        bool handleComplete(GHandle handle) override;
+#endif
+
+        SslRecvAwaitable* m_owner;
+    };
+
+    struct SendCtx : public SendIOContext {
+        explicit SendCtx(SslRecvAwaitable* owner)
+            : SendIOContext(nullptr, 0), m_owner(owner) {}
+
+#ifdef USE_IOURING
+        bool handleComplete(struct io_uring_cqe* cqe, GHandle handle) override;
+#else
+        bool handleComplete(GHandle handle) override;
+#endif
+
+        SslRecvAwaitable* m_owner;
+    };
+
+    enum class ReadAction {
+        NeedRecv,
+        NeedSend,
+        Completed,
+    };
+
+    enum class SendChunkState {
+        Ready,
+        Drained,
+        Failed,
+    };
+
     SslRecvAwaitable(IOController* controller, SslEngine* engine,
                      char* buffer, size_t length,
                      std::vector<char>* cipherBuffer = nullptr);
+    SslRecvAwaitable(const SslRecvAwaitable&) = delete;
+    SslRecvAwaitable& operator=(const SslRecvAwaitable&) = delete;
+    SslRecvAwaitable(SslRecvAwaitable&& other) noexcept;
+    SslRecvAwaitable& operator=(SslRecvAwaitable&& other) noexcept;
 
-#ifdef USE_IOURING
-    bool handleComplete(struct io_uring_cqe* cqe, GHandle handle) override;
-#else
-    bool handleComplete(GHandle handle) override;
-#endif
-
+    bool await_ready() { return false; }
     bool await_suspend(std::coroutine_handle<> handle);
     std::expected<Bytes, SslError> await_resume();
+
+    void resetTaskQueue();
+    void syncRecvBuffer();
+    ReadAction drainPlaintext();
+    SendChunkState prepareSendChunk();
+    bool scheduleSendThenRecv();
 
     SslEngine* m_engine;
     char* m_plainBuffer;
     size_t m_plainLength;
     std::vector<char>* m_cipherBuffer;
     std::vector<char> m_cipherBufferOwned;
-    size_t m_flushOffset = 0;
-    size_t m_flushLength = 0;
     std::expected<Bytes, SslError> m_sslResult;
     bool m_sslResultSet = false;
+
+    RecvCtx m_recvCtx;
+    SendCtx m_sendCtx;
 };
 
 // ==================== SslSendAwaitable ====================

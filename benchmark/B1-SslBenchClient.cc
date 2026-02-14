@@ -76,6 +76,7 @@ void signalHandler(int) {
 Coroutine sslClient(SslContext* ctx,
                     const std::string& host, uint16_t port,
                     const std::string& message, int requestCount,
+                    int connectRetries,
                     std::atomic<int>* thread_done,
                     ThreadMetrics* metrics,
                     bool statsEnabled) {
@@ -95,9 +96,29 @@ Coroutine sslClient(SslContext* ctx,
     // 设置 SNI
     socket.setHostname(host);
 
-    // 连接
-    auto connectResult = co_await socket.connect(Host(IPType::IPV4, host, port));
-    if (!connectResult) {
+    // 连接（轻量重试，缓解高并发瞬时接入抖动）
+    bool connected = false;
+    for (int attempt = 0; attempt < connectRetries; ++attempt) {
+        auto connectResult = co_await socket.connect(Host(IPType::IPV4, host, port));
+        if (connectResult) {
+            connected = true;
+            break;
+        }
+
+        if (attempt + 1 >= connectRetries) {
+            break;
+        }
+
+        co_await socket.close();
+        socket = SslSocket(ctx);
+        if (!socket.isValid()) {
+            break;
+        }
+        socket.option().handleNonBlock();
+        socket.setHostname(host);
+    }
+
+    if (!connected) {
         metrics->errors += 1;
         metrics->connect_fail += 1;
         co_await socket.close();
@@ -195,7 +216,8 @@ Coroutine sslClient(SslContext* ctx,
 
 void runClientThread(const std::string& host, uint16_t port,
                      int connections, int requestsPerConn,
-                     size_t payloadBytes, bool statsEnabled) {
+                     size_t payloadBytes, bool statsEnabled,
+                     int connectRetries) {
     ThreadMetrics metrics;
 
     // 创建 SSL 上下文
@@ -229,7 +251,8 @@ void runClientThread(const std::string& host, uint16_t port,
 
     // 启动客户端连接
     for (int i = 0; i < connections; i++) {
-        scheduler.spawn(sslClient(&ctx, host, port, message, requestsPerConn, &thread_done, &metrics, statsEnabled));
+        scheduler.spawn(sslClient(&ctx, host, port, message, requestsPerConn,
+                                  connectRetries, &thread_done, &metrics, statsEnabled));
     }
 
     // 等待完成
@@ -262,6 +285,10 @@ int main(int argc, char* argv[]) {
     if (argc >= 7) {
         threads = std::max(1, std::stoi(argv[6]));
     }
+    int connectRetries = 3;
+    if (argc >= 8) {
+        connectRetries = std::max(1, std::stoi(argv[7]));
+    }
 
     // 设置信号处理
     signal(SIGINT, signalHandler);
@@ -284,7 +311,8 @@ int main(int argc, char* argv[]) {
         if (conns == 0) {
             continue;
         }
-        workers.emplace_back(runClientThread, host, port, conns, requestsPerConn, payloadBytes, statsEnabled);
+        workers.emplace_back(runClientThread, host, port, conns, requestsPerConn,
+                             payloadBytes, statsEnabled, connectRetries);
     }
 
     for (auto& t : workers) {

@@ -94,7 +94,7 @@ Coroutine handleClient(SslContext* ctx, GHandle handle) {
     co_await client.close();
 }
 
-Coroutine sslServer(IOScheduler* scheduler, SslContext* ctx, uint16_t port) {
+Coroutine sslServer(IOScheduler* scheduler, SslContext* ctx, uint16_t port, int backlog) {
     SslSocket listener(ctx);
 
     if (!listener.isValid()) {
@@ -110,7 +110,7 @@ Coroutine sslServer(IOScheduler* scheduler, SslContext* ctx, uint16_t port) {
         co_return;
     }
 
-    auto listenResult = listener.listen(1024);
+    auto listenResult = listener.listen(backlog);
     if (!listenResult) {
         logErrno("listen failed");
         co_return;
@@ -141,6 +141,10 @@ int main(int argc, char* argv[]) {
     uint16_t port = static_cast<uint16_t>(std::stoi(argv[1]));
     std::string certFile = argv[2];
     std::string keyFile = argv[3];
+    int backlog = 4096;
+    if (argc >= 5) {
+        backlog = std::max(128, std::stoi(argv[4]));
+    }
 
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);
@@ -164,7 +168,7 @@ int main(int argc, char* argv[]) {
     TestScheduler scheduler;
     scheduler.start();
 
-    scheduler.spawn(sslServer(&scheduler, &ctx, port));
+    scheduler.spawn(sslServer(&scheduler, &ctx, port, backlog));
 
     while (g_running) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
