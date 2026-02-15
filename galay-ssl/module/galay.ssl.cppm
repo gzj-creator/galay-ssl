@@ -1,3 +1,7 @@
+module;
+
+#include "galay-ssl/module/ModulePrelude.hpp"
+
 export module galay.ssl;
 
 export {
