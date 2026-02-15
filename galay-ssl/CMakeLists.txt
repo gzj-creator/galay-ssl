@@ -40,9 +40,9 @@ endif()
 
 # 链接 galay-kernel（使用系统安装的库）
 target_link_libraries(galay-ssl PUBLIC
-    galay-kernel
+    galay-kernel-dev
     OpenSSL::SSL OpenSSL::Crypto
-    ${PLATFORM_LIBS}
+    ${PLATFORM_LIBS}    
 )
 
 # 链接 spdlog

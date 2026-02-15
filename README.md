@@ -86,6 +86,25 @@ using namespace galay::ssl;
 - `examples/import/E1-SslEchoServer.cc`
 - `examples/import/E2-SslClient.cc`
 
+### 模块支持更新（2026-02）
+
+本次模块接口已统一为同一范式：
+
+- `module;`
+- `#include "galay-ssl/module/ModulePrelude.hpp"`
+- `export module galay.ssl;`
+- `export { #include ... }`
+
+新增预导入头文件：`galay-ssl/module/ModulePrelude.hpp`，用于把系统/第三方依赖放在全局模块片段，降低模块构建期冲突。
+
+推荐构建命令（Clang 20 + Ninja）：
+
+```bash
+cmake -S . -B build-mod -G Ninja \
+  -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm@20/bin/clang++
+cmake --build build-mod --target galay-ssl-modules -j
+```
+
 ## 快速开始
 
 ```cpp
