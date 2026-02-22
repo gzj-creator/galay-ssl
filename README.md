@@ -26,34 +26,55 @@
 - C++23 编译器（GCC 13+ / Clang 16+）
 - CMake 3.16+
 - OpenSSL 1.1.1+
-- `galay-kernel`
+- Galay 内部依赖（统一联调推荐）：
+  - `galay-kernel`（构建必需）
+  - `galay-utils`（推荐）
+  - `galay-http`（推荐）
 - Linux 下启用 `io_uring` 时需要 `liburing`（缺失时自动回退 `epoll`）
+
+## 依赖安装（macOS / Homebrew）
+
+```bash
+brew install cmake spdlog openssl
+```
+
+## 依赖安装（Ubuntu / Debian）
+
+```bash
+sudo apt-get update
+sudo apt-get install -y cmake g++ libspdlog-dev libssl-dev liburing-dev
+```
 
 ## 编译安装
 
 ```bash
+git clone https://github.com/gzj-creator/galay-kernel.git
+git clone https://github.com/gzj-creator/galay-utils.git
+git clone https://github.com/gzj-creator/galay-http.git
 git clone https://github.com/gzj-creator/galay-ssl.git
 cd galay-ssl
 
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=ON
-cmake --build build -j
+cmake --build build --parallel
 
 # 安装（可选）
 sudo cmake --install build
 ```
 
+仅单独构建 `galay-ssl` 时，最小内部依赖为 `galay-kernel`。
+
 Linux 强制使用 `epoll`：
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=ON -DDISABLE_IOURING=ON
-cmake --build build -j
+cmake --build build --parallel
 ```
 
 如果要显式关闭模块接口（默认开启，工具链支持时生效）：
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=ON -DBUILD_MODULE_EXAMPLES=OFF
-cmake --build build -j
+cmake --build build --parallel
 ```
 
 ## CMake 链接
@@ -102,7 +123,7 @@ using namespace galay::ssl;
 ```bash
 cmake -S . -B build-mod -G Ninja \
   -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm@20/bin/clang++
-cmake --build build-mod --target galay-ssl-modules -j
+cmake --build build-mod --target galay-ssl-modules --parallel
 ```
 
 ## 快速开始
