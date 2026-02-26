@@ -35,15 +35,10 @@ endif()
 
 # 链接 galay-kernel（使用系统安装的库）
 target_link_libraries(galay-ssl PUBLIC
-    galay-kernel
+    galay-kernel::galay-kernel
     OpenSSL::SSL OpenSSL::Crypto
     ${PLATFORM_LIBS}
 )
-
-# 链接 spdlog（仅 header-only）
-if(ENABLE_LOG)
-    target_link_libraries(galay-ssl PRIVATE spdlog::spdlog_header_only)
-endif()
 
 # 设置库的编译选项
 target_compile_options(galay-ssl PRIVATE
