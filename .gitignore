@@ -1,4 +1,5 @@
-build
-.cache
-
+build/
+build-*/
+.cache/
 .claude/
+test_results/

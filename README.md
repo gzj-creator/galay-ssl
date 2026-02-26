@@ -39,14 +39,14 @@
 ## 依赖安装（macOS / Homebrew）
 
 ```bash
-brew install cmake spdlog openssl
+brew install cmake openssl
 ```
 
 ## 依赖安装（Ubuntu / Debian）
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y cmake g++ libspdlog-dev libssl-dev liburing-dev
+sudo apt-get install -y cmake g++ libssl-dev liburing-dev
 ```
 
 ## 编译安装
