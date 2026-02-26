@@ -6,6 +6,8 @@ include(CMakeFindDependencyMacro)
 find_dependency(OpenSSL REQUIRED)
 find_dependency(galay-kernel REQUIRED)
 
+# spdlog 仅作为 header-only 依赖，不需要在此查找
+
 # 包含目标文件
 include("${CMAKE_CURRENT_LIST_DIR}/galay-ssl-targets.cmake")
 

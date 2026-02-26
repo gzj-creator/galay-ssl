@@ -91,18 +91,12 @@ message(STATUS "OpenSSL version: ${OPENSSL_VERSION}")
 message(STATUS "OpenSSL include dir: ${OPENSSL_INCLUDE_DIR}")
 message(STATUS "OpenSSL libraries: ${OPENSSL_LIBRARIES}")
 
-# 使用系统安装的 galay-kernel
-set(GALAY_KERNEL_INCLUDE_DIR "/usr/local/include")
-set(GALAY_KERNEL_LIB_DIR "/usr/local/lib")
-
-# 添加 galay-kernel 头文件路径
-include_directories(BEFORE ${GALAY_KERNEL_INCLUDE_DIR})
-
-# 创建导入的静态库目标
-add_library(galay-kernel-dev STATIC IMPORTED)
-set_target_properties(galay-kernel-dev PROPERTIES
-    IMPORTED_LOCATION "${GALAY_KERNEL_LIB_DIR}/libgalay-kernel.a"
-)
+# 查找 galay-kernel（支持动态库和静态库）
+find_package(galay-kernel REQUIRED)
+if(NOT galay-kernel_FOUND)
+    message(FATAL_ERROR "galay-kernel not found. Please install galay-kernel first.")
+endif()
+message(STATUS "Found galay-kernel")
 
 # 查找spdlog
 if(ENABLE_LOG)

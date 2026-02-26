@@ -21,11 +21,6 @@ target_include_directories(galay-ssl
         $<INSTALL_INTERFACE:include/galay-ssl>
 )
 
-# 包含 galay-kernel 头文件路径
-target_include_directories(galay-ssl PUBLIC
-    /usr/local/include
-)
-
 # 查找平台相关库
 if(UNIX AND NOT APPLE)
     find_library(URING_LIB uring)
@@ -40,14 +35,14 @@ endif()
 
 # 链接 galay-kernel（使用系统安装的库）
 target_link_libraries(galay-ssl PUBLIC
-    galay-kernel-dev
+    galay-kernel
     OpenSSL::SSL OpenSSL::Crypto
-    ${PLATFORM_LIBS}    
+    ${PLATFORM_LIBS}
 )
 
-# 链接 spdlog
+# 链接 spdlog（仅 header-only）
 if(ENABLE_LOG)
-    target_link_libraries(galay-ssl PUBLIC spdlog::spdlog)
+    target_link_libraries(galay-ssl PRIVATE spdlog::spdlog_header_only)
 endif()
 
 # 设置库的编译选项
