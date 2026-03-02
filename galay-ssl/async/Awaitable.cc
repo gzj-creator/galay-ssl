@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <limits>
 #include <string_view>
-#include <sys/event.h>
 #include <unistd.h>
 
 namespace galay::ssl
