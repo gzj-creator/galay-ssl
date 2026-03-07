@@ -267,8 +267,14 @@ bool SslRecvAwaitable::RecvCtx::handleComplete(struct io_uring_cqe* cqe, GHandle
         return true;
     }
 
-    auto& bytes = result.value();
-    m_owner->m_engine->feedEncryptedInput(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    const size_t recvBytes = result.value();
+    if (recvBytes == 0) {
+        m_owner->m_sslResult = Bytes();
+        m_owner->m_sslResultSet = true;
+        return true;
+    }
+
+    m_owner->m_engine->feedEncryptedInput(m_buffer, recvBytes);
 
     auto action = m_owner->drainPlaintext();
     if (action == SslRecvAwaitable::ReadAction::Completed) {
@@ -306,8 +312,14 @@ bool SslRecvAwaitable::RecvCtx::handleComplete(GHandle handle)
             return true;
         }
 
-        auto& bytes = result.value();
-        m_owner->m_engine->feedEncryptedInput(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        const size_t recvBytes = result.value();
+        if (recvBytes == 0) {
+            m_owner->m_sslResult = Bytes();
+            m_owner->m_sslResultSet = true;
+            return true;
+        }
+
+        m_owner->m_engine->feedEncryptedInput(m_buffer, recvBytes);
 
         auto action = m_owner->drainPlaintext();
         if (action == SslRecvAwaitable::ReadAction::Completed) {
@@ -605,13 +617,24 @@ std::expected<size_t, SslError> SslSendAwaitable::await_resume()
 
 // ==================== SslHandshakeAwaitable ====================
 
-SslHandshakeAwaitable::SslHandshakeAwaitable(IOController* controller, SslEngine* engine)
+SslHandshakeAwaitable::SslHandshakeAwaitable(IOController* controller, SslEngine* engine,
+                                             std::vector<char>* ioBuffer)
     : CustomAwaitable(controller)
     , m_engine(engine)
-    , m_ioBuf(kCipherBufSize)
-    , m_recvCtx(m_ioBuf.data(), m_ioBuf.size(), this)
-    , m_sendCtx(m_ioBuf.data(), 0, this)
+    , m_ioBuf(ioBuffer ? ioBuffer : &m_ioBufOwned)
+    , m_ioBufOwned()
+    , m_recvCtx(nullptr, 0, this)
+    , m_sendCtx(nullptr, 0, this)
 {
+    if (!ensureBufferSize(*m_ioBuf, kCipherBufSize)) {
+        m_result = std::unexpected(SslError(SslErrorCode::kHandshakeFailed, 0));
+        m_resultSet = true;
+        return;
+    }
+    m_recvCtx.m_buffer = m_ioBuf->data();
+    m_recvCtx.m_length = m_ioBuf->size();
+    m_sendCtx.m_buffer = m_ioBuf->data();
+    m_sendCtx.m_length = 0;
     tryHandshake();
 }
 
@@ -629,14 +652,14 @@ void SslHandshakeAwaitable::tryHandshake()
             // 握手成功，但可能有待发送的加密数据（如 TLS 1.3 NewSessionTicket）
             size_t pending = m_engine->pendingEncryptedOutput();
             if (pending > 0) {
-                if (!ensureBufferSize(m_ioBuf, pending)) {
+                if (!ensureBufferSize(*m_ioBuf, pending)) {
                     m_result = std::unexpected(SslError(SslErrorCode::kHandshakeFailed, 0));
                     m_resultSet = true;
                     return;
                 }
-                int n = m_engine->extractEncryptedOutput(m_ioBuf.data(), m_ioBuf.size());
+                int n = m_engine->extractEncryptedOutput(m_ioBuf->data(), m_ioBuf->size());
                 if (n > 0) {
-                    m_sendCtx.m_buffer = m_ioBuf.data();
+                    m_sendCtx.m_buffer = m_ioBuf->data();
                     m_sendCtx.m_length = static_cast<size_t>(n);
                     m_sendCtx.m_followedByRecv = false;
                     m_result = {};
@@ -652,14 +675,14 @@ void SslHandshakeAwaitable::tryHandshake()
 
         case SslIOResult::WantWrite: {
             size_t pending = m_engine->pendingEncryptedOutput();
-            if (!ensureBufferSize(m_ioBuf, pending)) {
+            if (!ensureBufferSize(*m_ioBuf, pending)) {
                 m_result = std::unexpected(SslError(SslErrorCode::kHandshakeFailed, 0));
                 m_resultSet = true;
                 return;
             }
-            int n = m_engine->extractEncryptedOutput(m_ioBuf.data(), m_ioBuf.size());
+            int n = m_engine->extractEncryptedOutput(m_ioBuf->data(), m_ioBuf->size());
             if (n > 0) {
-                m_sendCtx.m_buffer = m_ioBuf.data();
+                m_sendCtx.m_buffer = m_ioBuf->data();
                 m_sendCtx.m_length = static_cast<size_t>(n);
                 m_sendCtx.m_followedByRecv = false;
                 addTask(IOEventType::SEND, &m_sendCtx);
@@ -673,21 +696,21 @@ void SslHandshakeAwaitable::tryHandshake()
         case SslIOResult::WantRead: {
             size_t pending = m_engine->pendingEncryptedOutput();
             if (pending > 0) {
-                if (!ensureBufferSize(m_ioBuf, pending)) {
+                if (!ensureBufferSize(*m_ioBuf, pending)) {
                     m_result = std::unexpected(SslError(SslErrorCode::kHandshakeFailed, 0));
                     m_resultSet = true;
                     return;
                 }
-                int n = m_engine->extractEncryptedOutput(m_ioBuf.data(), m_ioBuf.size());
+                int n = m_engine->extractEncryptedOutput(m_ioBuf->data(), m_ioBuf->size());
                 if (n > 0) {
-                    m_sendCtx.m_buffer = m_ioBuf.data();
+                    m_sendCtx.m_buffer = m_ioBuf->data();
                     m_sendCtx.m_length = static_cast<size_t>(n);
                     m_sendCtx.m_followedByRecv = true;
                     addTask(IOEventType::SEND, &m_sendCtx);
                 }
             }
-            m_recvCtx.m_buffer = m_ioBuf.data();
-            m_recvCtx.m_length = m_ioBuf.size();
+            m_recvCtx.m_buffer = m_ioBuf->data();
+            m_recvCtx.m_length = m_ioBuf->size();
             addTask(IOEventType::RECV, &m_recvCtx);
             return;
         }
@@ -725,8 +748,14 @@ bool SslHandshakeAwaitable::HandshakeRecvCtx::handleComplete(struct io_uring_cqe
         return true;
     }
 
-    auto& bytes = result.value();
-    m_owner->m_engine->feedEncryptedInput(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    const size_t recvBytes = result.value();
+    if (recvBytes == 0) {
+        m_owner->m_result = std::unexpected(SslError(SslErrorCode::kHandshakeFailed, 0));
+        m_owner->m_resultSet = true;
+        return true;
+    }
+
+    m_owner->m_engine->feedEncryptedInput(m_buffer, recvBytes);
     m_owner->tryHandshake();
     return true;
 }
@@ -746,8 +775,14 @@ bool SslHandshakeAwaitable::HandshakeRecvCtx::handleComplete(GHandle handle)
             return true;
         }
 
-        auto& bytes = result.value();
-        m_owner->m_engine->feedEncryptedInput(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        const size_t recvBytes = result.value();
+        if (recvBytes == 0) {
+            m_owner->m_result = std::unexpected(SslError(SslErrorCode::kHandshakeFailed, 0));
+            m_owner->m_resultSet = true;
+            return true;
+        }
+
+        m_owner->m_engine->feedEncryptedInput(m_buffer, recvBytes);
         fedAny = true;
     }
 
@@ -822,13 +857,24 @@ bool SslHandshakeAwaitable::HandshakeSendCtx::handleComplete(GHandle handle)
 
 // ==================== SslShutdownAwaitable ====================
 
-SslShutdownAwaitable::SslShutdownAwaitable(IOController* controller, SslEngine* engine)
+SslShutdownAwaitable::SslShutdownAwaitable(IOController* controller, SslEngine* engine,
+                                           std::vector<char>* ioBuffer)
     : CustomAwaitable(controller)
     , m_engine(engine)
-    , m_ioBuf(kCipherBufSize)
-    , m_recvCtx(m_ioBuf.data(), m_ioBuf.size(), this)
-    , m_sendCtx(m_ioBuf.data(), 0, this)
+    , m_ioBuf(ioBuffer ? ioBuffer : &m_ioBufOwned)
+    , m_ioBufOwned()
+    , m_recvCtx(nullptr, 0, this)
+    , m_sendCtx(nullptr, 0, this)
 {
+    if (!ensureBufferSize(*m_ioBuf, kCipherBufSize)) {
+        m_result = {};
+        m_resultSet = true;
+        return;
+    }
+    m_recvCtx.m_buffer = m_ioBuf->data();
+    m_recvCtx.m_length = m_ioBuf->size();
+    m_sendCtx.m_buffer = m_ioBuf->data();
+    m_sendCtx.m_length = 0;
     tryShutdown();
 }
 
@@ -849,14 +895,14 @@ void SslShutdownAwaitable::tryShutdown()
 
         case SslIOResult::WantWrite: {
             size_t pending = m_engine->pendingEncryptedOutput();
-            if (!ensureBufferSize(m_ioBuf, pending)) {
+            if (!ensureBufferSize(*m_ioBuf, pending)) {
                 m_result = {};
                 m_resultSet = true;
                 return;
             }
-            int n = m_engine->extractEncryptedOutput(m_ioBuf.data(), m_ioBuf.size());
+            int n = m_engine->extractEncryptedOutput(m_ioBuf->data(), m_ioBuf->size());
             if (n > 0) {
-                m_sendCtx.m_buffer = m_ioBuf.data();
+                m_sendCtx.m_buffer = m_ioBuf->data();
                 m_sendCtx.m_length = static_cast<size_t>(n);
                 m_sendCtx.m_followedByRecv = false;
                 addTask(IOEventType::SEND, &m_sendCtx);
@@ -870,21 +916,21 @@ void SslShutdownAwaitable::tryShutdown()
         case SslIOResult::WantRead: {
             size_t pending = m_engine->pendingEncryptedOutput();
             if (pending > 0) {
-                if (!ensureBufferSize(m_ioBuf, pending)) {
+                if (!ensureBufferSize(*m_ioBuf, pending)) {
                     m_result = {};
                     m_resultSet = true;
                     return;
                 }
-                int n = m_engine->extractEncryptedOutput(m_ioBuf.data(), m_ioBuf.size());
+                int n = m_engine->extractEncryptedOutput(m_ioBuf->data(), m_ioBuf->size());
                 if (n > 0) {
-                    m_sendCtx.m_buffer = m_ioBuf.data();
+                    m_sendCtx.m_buffer = m_ioBuf->data();
                     m_sendCtx.m_length = static_cast<size_t>(n);
                     m_sendCtx.m_followedByRecv = true;
                     addTask(IOEventType::SEND, &m_sendCtx);
                 }
             }
-            m_recvCtx.m_buffer = m_ioBuf.data();
-            m_recvCtx.m_length = m_ioBuf.size();
+            m_recvCtx.m_buffer = m_ioBuf->data();
+            m_recvCtx.m_length = m_ioBuf->size();
             addTask(IOEventType::RECV, &m_recvCtx);
             return;
         }
@@ -922,8 +968,14 @@ bool SslShutdownAwaitable::ShutdownRecvCtx::handleComplete(struct io_uring_cqe* 
         return true;
     }
 
-    auto& bytes = result.value();
-    m_owner->m_engine->feedEncryptedInput(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    const size_t recvBytes = result.value();
+    if (recvBytes == 0) {
+        m_owner->m_result = {};
+        m_owner->m_resultSet = true;
+        return true;
+    }
+
+    m_owner->m_engine->feedEncryptedInput(m_buffer, recvBytes);
     m_owner->tryShutdown();
     return true;
 }
@@ -942,8 +994,14 @@ bool SslShutdownAwaitable::ShutdownRecvCtx::handleComplete(GHandle handle)
             return true;
         }
 
-        auto& bytes = result.value();
-        m_owner->m_engine->feedEncryptedInput(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        const size_t recvBytes = result.value();
+        if (recvBytes == 0) {
+            m_owner->m_result = {};
+            m_owner->m_resultSet = true;
+            return true;
+        }
+
+        m_owner->m_engine->feedEncryptedInput(m_buffer, recvBytes);
         fedAny = true;
     }
 

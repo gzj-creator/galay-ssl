@@ -177,7 +177,8 @@ struct SslHandshakeAwaitable : public CustomAwaitable {
         bool m_followedByRecv = false;  // RECV 已入队则不需要再调 tryHandshake
     };
 
-    SslHandshakeAwaitable(IOController* controller, SslEngine* engine);
+    SslHandshakeAwaitable(IOController* controller, SslEngine* engine,
+                          std::vector<char>* ioBuffer = nullptr);
 
     bool await_ready();
     std::expected<void, SslError> await_resume();
@@ -186,7 +187,8 @@ struct SslHandshakeAwaitable : public CustomAwaitable {
     void tryHandshake();
 
     SslEngine* m_engine;
-    std::vector<char> m_ioBuf;
+    std::vector<char>* m_ioBuf;
+    std::vector<char> m_ioBufOwned;
     std::expected<void, SslError> m_result;
     bool m_resultSet = false;
     bool m_handshakeSucceeded = false;  ///< 握手已成功，正在发送剩余密文
@@ -232,7 +234,8 @@ struct SslShutdownAwaitable : public CustomAwaitable {
         bool m_followedByRecv = false;
     };
 
-    SslShutdownAwaitable(IOController* controller, SslEngine* engine);
+    SslShutdownAwaitable(IOController* controller, SslEngine* engine,
+                         std::vector<char>* ioBuffer = nullptr);
 
     bool await_ready();
     std::expected<void, SslError> await_resume();
@@ -241,7 +244,8 @@ struct SslShutdownAwaitable : public CustomAwaitable {
     void tryShutdown();
 
     SslEngine* m_engine;
-    std::vector<char> m_ioBuf;
+    std::vector<char>* m_ioBuf;
+    std::vector<char> m_ioBufOwned;
     std::expected<void, SslError> m_result;
     bool m_resultSet = false;
 

@@ -139,7 +139,7 @@ SslHandshakeAwaitable SslSocket::handshake()
         initEngine();
     }
 
-    return SslHandshakeAwaitable(&m_controller, &m_engine);
+    return SslHandshakeAwaitable(&m_controller, &m_engine, &m_handshakeBuffer);
 }
 
 SslRecvAwaitable SslSocket::recv(char* buffer, size_t length)
@@ -154,7 +154,7 @@ SslSendAwaitable SslSocket::send(const char* buffer, size_t length)
 
 SslShutdownAwaitable SslSocket::shutdown()
 {
-    return SslShutdownAwaitable(&m_controller, &m_engine);
+    return SslShutdownAwaitable(&m_controller, &m_engine, &m_shutdownBuffer);
 }
 
 CloseAwaitable SslSocket::close()

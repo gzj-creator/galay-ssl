@@ -3,6 +3,9 @@ if(BUILD_TESTS)
     add_executable(T1-SslSocketTest T1-SslSocketTest.cc)
     target_link_libraries(T1-SslSocketTest PRIVATE galay-ssl)
 
+    add_executable(T2-SslLoopbackSmoke T2-SslLoopbackSmoke.cc)
+    target_link_libraries(T2-SslLoopbackSmoke PRIVATE galay-ssl)
+
     # 复制测试证书到 bin 目录和 build 根目录
     file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/certs
          DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})

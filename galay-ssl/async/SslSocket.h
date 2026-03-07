@@ -290,6 +290,8 @@ private:
     SslEngine m_engine;         ///< SSL 引擎
     bool m_isServer;            ///< 是否为服务端模式
     bool m_engineInitialized;   ///< SSL 引擎是否已初始化
+    std::vector<char> m_handshakeBuffer;
+    std::vector<char> m_shutdownBuffer;
     std::vector<char> m_recvCipherBuffer;
     std::vector<char> m_sendCipherBuffer;
 };
