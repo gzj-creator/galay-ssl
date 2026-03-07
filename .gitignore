@@ -1,5 +1,6 @@
 build/
 build-*/
+.worktrees/
 .cache/
 .claude/
 test_results/
