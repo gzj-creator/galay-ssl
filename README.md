@@ -1,239 +1,192 @@
 # galay-ssl
 
-基于 C++23 协程的异步 SSL/TLS 库，属于 galay 生态。
+`galay-ssl` 是一个基于 C++23 协程、OpenSSL Memory BIO 和 `galay-kernel` 调度器的异步 SSL/TLS 库。
 
-## 特性
+## 仓库真相来源
 
-- 异步 SSL Socket API（`SslSocket`），支持 `connect/handshake/recv/send/shutdown/close`
-- 基于 OpenSSL Memory BIO 的解耦实现（SSL 状态机与网络 IO 分离）
-- 支持 TLS 1.2 / TLS 1.3、SNI、ALPN、Session 复用
-- 统一 `std::expected` 风格错误返回（`SslError` / `IOError`）
-- 与 `galay-kernel` 协程调度器无缝集成
-- 支持 `kqueue`（macOS）、`epoll` / `io_uring`（Linux）
+当文档与实现不一致时，本仓库按以下顺序判定真相：
+
+1. 公开头文件与导出目标：`galay-ssl/ssl/*.h`、`galay-ssl/async/*.h`、`galay-ssl/common/*.h*`
+2. 真实实现：`galay-ssl/**/*.cc`
+3. 可执行示例：`examples/`
+4. 测试：`test/`
+5. Benchmark：`benchmark/`
+6. Markdown 文档
+
+## 核心能力
+
+- `SslContext`：证书、CA、验证模式、TLS 版本、Cipher、ALPN、Session 缓存配置
+- `SslEngine`：单连接级 OpenSSL 封装，基于 Memory BIO 解耦 SSL 与网络 IO
+- `SslSocket`：与 `galay-kernel` 协程/调度器集成的异步 SSL socket
+- 平台后端：macOS 使用 `kqueue`，Linux 使用 `epoll` 或 `io_uring`
+- 示例、测试、benchmark 都在仓库内提供独立 target
 
 ## 文档导航
 
-建议按以下顺序阅读：
+建议先看 `docs/README.md`。以下链接全部对应仓库中的真实文件：
 
-1. [快速开始](docs/01-快速开始.md) - 依赖、编译、最小可运行示例
-2. [使用示例](docs/02-使用示例.md) - 服务端/客户端、证书验证、Session 复用
-3. [模块介绍](docs/03-模块介绍.md) - SslContext/SslEngine/SslSocket 模块说明
-4. [运行原理](docs/04-运行原理.md) - Memory BIO 状态机、协程调度流程
-5. [性能分析](docs/05-性能分析.md) - 压测方法、关键指标、优化建议
-6. [API 文档](docs/06-API文档.md) - 完整 API 参考、接口说明
-7. [架构设计](docs/07-架构设计.md) - 整体架构、模块职责、设计决策
-8. [常见问题](docs/08-常见问题.md) - 编译、连接、证书、性能等问题解答
-9. [高级主题](docs/09-高级主题.md) - 证书管理、TLS 配置、性能优化、安全加固
+| 顺序 | 文档 | 作用 |
+|------|------|------|
+| 00 | [00-快速开始](docs/00-快速开始.md) | 依赖、构建、安装后消费、最小运行闭环 |
+| 01 | [01-架构设计](docs/01-架构设计.md) | 组件分层、Memory BIO 数据流、生命周期 |
+| 02 | [02-API参考](docs/02-API参考.md) | 与公开头文件对齐的 API 参考 |
+| 03 | [03-使用指南](docs/03-使用指南.md) | 构建选项、脚本覆盖范围、直接运行命令 |
+| 04 | [04-示例代码](docs/04-示例代码.md) | 真实示例文件、target 名、运行命令、验证状态 |
+| 05 | [05-性能测试](docs/05-性能测试.md) | 真实 benchmark target、命令、指标口径、历史说明 |
+| 06 | [06-高级主题](docs/06-高级主题.md) | ALPN、Session、mTLS、Modules 等高级能力现状 |
+| 07 | [07-常见问题](docs/07-常见问题.md) | FAQ、已知限制、排错入口 |
 
-## 依赖
+补充说明：
 
-- C++23 编译器（GCC 13+ / Clang 16+）
-- CMake 3.16+
-- OpenSSL 1.1.1+
-- Galay 内部依赖（统一联调推荐）：
-  - `galay-kernel`（构建必需）
-  - `galay-utils`（推荐）
-  - `galay-http`（推荐）
-- Linux 下启用 `io_uring` 时需要 `liburing`（缺失时自动回退 `epoll`）
+- benchmark 运行入口与限制统一收敛到 [docs/05-性能测试.md](docs/05-性能测试.md)
+- `test/certs/README.md` 仅作为测试资产说明保留，不属于主文档面
 
-## 依赖安装（macOS / Homebrew）
+## 构建前提
 
-```bash
-brew install cmake openssl
-```
+| 项目 | 要求 | 说明 |
+|------|------|------|
+| 编译器 | C++23 | 仓库代码使用 `std::expected` 与协程 |
+| CMake | `>= 3.16` | 默认源码构建（库 / tests / benchmarks / include 示例） |
+| OpenSSL | 开发包可发现 | `find_package(OpenSSL REQUIRED)` |
+| `galay-kernel` | 必需 | `find_package(galay-kernel REQUIRED)` |
+| `liburing` | Linux 可选 | 缺失时自动回退 `epoll` |
+| Modules | CMake `>= 3.28` + 支持模块扫描的生成器/编译器 | 仅影响 `galay-ssl-modules` 与 import 示例 |
 
-## 依赖安装（Ubuntu / Debian）
+## 构建仓库
 
-```bash
-sudo apt-get update
-sudo apt-get install -y cmake g++ libssl-dev liburing-dev
-```
-
-## 编译安装
+从仓库根目录运行：
 
 ```bash
-git clone https://github.com/gzj-creator/galay-kernel.git
-git clone https://github.com/gzj-creator/galay-utils.git
-git clone https://github.com/gzj-creator/galay-http.git
-git clone https://github.com/gzj-creator/galay-ssl.git
-cd galay-ssl
-
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=ON
-cmake --build build --parallel
-
-# 安装（可选）
-sudo cmake --install build
-```
-
-仅单独构建 `galay-ssl` 时，最小内部依赖为 `galay-kernel`。
-
-Linux 强制使用 `epoll`：
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=ON -DDISABLE_IOURING=ON
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DENABLE_LTO=ON
 cmake --build build --parallel
 ```
 
-如果要显式关闭模块接口（默认开启，工具链支持时生效）：
+说明：
+
+- `BUILD_TESTS`、`BUILD_BENCHMARKS`、`BUILD_EXAMPLES` 默认都是 `ON`
+- `BUILD_MODULE_EXAMPLES` 默认 `OFF`，这样默认构建在 CMake `>= 3.16` 时不会因为 modules 而硬失败
+- 如果你要生成 import 示例，需要显式传 `-DBUILD_MODULE_EXAMPLES=ON`
+- 仅有 CMake `>= 3.28` + `Ninja` / `Visual Studio` 还不够；还必须有编译器侧的模块依赖扫描能力
+- 当前根工程会在扫描能力缺失时给出 warning 并自动关闭 `BUILD_MODULE_EXAMPLES`
+- 已实测：macOS `AppleClang 17` + CMake `4.0.2` + `Ninja` 在缺少扫描能力时不会生成 import 示例
+- Linux 上可用 `-DDISABLE_IOURING=ON` 强制回退到 `epoll`
+
+## 安装与消费
+
+安装：
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=ON -DBUILD_MODULE_EXAMPLES=OFF
-cmake --build build --parallel
+cmake --install build --prefix "$PWD/.local"
 ```
 
-## CMake 链接
+安装后使用 CMake 导出 target：
 
 ```cmake
 find_package(galay-ssl REQUIRED)
-target_link_libraries(your_target PRIVATE galay-ssl::galay-ssl)
+add_executable(your_app main.cpp)
+target_link_libraries(your_app PRIVATE galay-ssl::galay-ssl)
 ```
 
-如果是源码同仓构建（`add_subdirectory`），也可直接链接目标 `galay-ssl`。
-
-## C++23 Modules
-
-`galay-ssl` 现在支持 C++23 `import/export`（工具链支持时）：
+最小 include 示例：
 
 ```cpp
-import galay.ssl;
+#include <galay-ssl/ssl/SslContext.h>
+#include <galay-ssl/async/SslSocket.h>
 
-using namespace galay::ssl;
-```
-
-模块接口文件：`galay-ssl/module/galay.ssl.cppm`  
-传统 `#include` 用法仍完全可用。  
-说明：`BUILD_MODULE_EXAMPLES` 需要 CMake `>= 3.28` 且使用 `Ninja` / `Visual Studio` 生成器。`Unix Makefiles` 下会自动关闭。
-
-`examples/` 中也提供了模块化导入版本：
-
-- `examples/include/E1-SslEchoServer.cc`
-- `examples/include/E2-SslClient.cc`
-- `examples/import/E1-SslEchoServer.cc`
-- `examples/import/E2-SslClient.cc`
-
-### 模块支持更新（2026-02）
-
-本次模块接口已统一为同一范式：
-
-- `module;`
-- `#include "galay-ssl/module/ModulePrelude.hpp"`
-- `export module galay.ssl;`
-- `export { #include ... }`
-
-新增预导入头文件：`galay-ssl/module/ModulePrelude.hpp`，用于把系统/第三方依赖放在全局模块片段，降低模块构建期冲突。
-
-推荐构建命令（Clang 20 + Ninja）：
-
-```bash
-cmake -S . -B build-mod -G Ninja \
-  -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm@20/bin/clang++
-cmake --build build-mod --target galay-ssl-modules --parallel
-```
-
-## 快速开始
-
-```cpp
-#include "galay-ssl/async/SslSocket.h"
-#include "galay-ssl/ssl/SslContext.h"
-#include <galay-kernel/kernel/Coroutine.h>
-
-#ifdef USE_KQUEUE
-#include <galay-kernel/kernel/KqueueScheduler.h>
-using IOSchedulerType = galay::kernel::KqueueScheduler;
-#elif defined(USE_EPOLL)
-#include <galay-kernel/kernel/EpollScheduler.h>
-using IOSchedulerType = galay::kernel::EpollScheduler;
-#elif defined(USE_IOURING)
-#include <galay-kernel/kernel/IOUringScheduler.h>
-using IOSchedulerType = galay::kernel::IOUringScheduler;
-#endif
-
-using namespace galay::ssl;
-using namespace galay::kernel;
-
-Coroutine echoClient(SslContext* ctx)
-{
-    SslSocket sock(ctx);
-    sock.option().handleNonBlock();
-    sock.setHostname("127.0.0.1");
-
-    auto conn = co_await sock.connect(Host(IPType::IPV4, "127.0.0.1", 8443));
-    if (!conn) co_return;
-
-    while (!sock.isHandshakeCompleted()) {
-        auto hs = co_await sock.handshake();
-        if (!hs) {
-            co_await sock.close();
-            co_return;
-        }
-    }
-
-    const char* msg = "hello";
-    auto s = co_await sock.send(msg, 5);
-    if (!s) {
-        co_await sock.close();
-        co_return;
-    }
-
-    char buf[256];
-    auto r = co_await sock.recv(buf, sizeof(buf));
-    if (r && r.value().size() > 0) {
-        // 处理 echo 数据
-    }
-
-    co_await sock.shutdown();
-    co_await sock.close();
+int main() {
+    galay::ssl::SslContext ctx(galay::ssl::SslMethod::TLS_Client);
+    return ctx.isValid() ? 0 : 1;
 }
 ```
 
-## 运行测试与压测
+消费链路说明：
+
+- `galay-ssl-config.cmake` 会自动 `find_dependency(OpenSSL REQUIRED)` 与 `find_dependency(galay-kernel REQUIRED)`
+- 本次文档修复期间已重新验证 `cmake --install` + `find_package(galay-ssl REQUIRED)` + 上述 include 写法可以真实编译通过
+- 已安装包当前只导出 `galay-ssl::galay-ssl`；没有导出 `galay-ssl::galay-ssl-modules`
+
+## 真实示例、测试与 benchmark
+
+下表只列仓库中真实存在的文件与 target：
+
+| 类型 | 源文件 | Target | 当前状态 |
+|------|--------|--------|----------|
+| include 示例 | `examples/include/E1-ssl_echo_server.cc` | `E1-SslEchoServer-Include` | 可构建，可运行 |
+| include 示例 | `examples/include/E2-ssl_client.cc` | `E2-SslClient-Include` | 可构建，可运行 |
+| import 示例 | `examples/import/E1-ssl_echo_server.cc` | `E1-SslEchoServer-Import` | 仅在模块工具链满足时生成 |
+| import 示例 | `examples/import/E2-ssl_client.cc` | `E2-SslClient-Import` | 仅在模块工具链满足时生成 |
+| 测试 | `test/T1-ssl_socket_test.cc` | `T1-SslSocketTest` | 脚本会运行 |
+| 测试 | `test/T2-ssl_loopback_smoke.cc` | `T2-SslLoopbackSmoke` | 脚本会运行 |
+| 测试 | `test/T3-ssl_advanced_smoke.cc` | `T3-SslAdvancedSmoke` | 脚本会运行 |
+| benchmark | `benchmark/B1-ssl_bench_server.cc` | `B1-SslBenchServer` | 可构建，可运行 |
+| benchmark | `benchmark/B1-ssl_bench_client.cc` | `B1-SslBenchClient` | 可构建，可运行 |
+
+## 直接运行命令
+
+以下命令都以仓库根目录为当前目录：
 
 ```bash
-# 构建 + 测试
-./scripts/run.sh build
-./scripts/run.sh test
+# include 示例
+./build/bin/E1-SslEchoServer-Include 8443 certs/server.crt certs/server.key
+./build/bin/E2-SslClient-Include 127.0.0.1 8443
+./build/bin/E2-SslClient-Include localhost 8443 certs/ca.crt
 
-# 压测
-./scripts/run.sh bench
-
-# 结果检查
-./scripts/check.sh
-```
-
-也可以直接运行：
-
-```bash
+# 测试
 ./build/bin/T1-SslSocketTest
+./build/bin/T2-SslLoopbackSmoke
+./build/bin/T3-SslAdvancedSmoke
+
+# benchmark
 ./build/bin/B1-SslBenchServer 8443 certs/server.crt certs/server.key
 ./build/bin/B1-SslBenchClient 127.0.0.1 8443 200 500 47 4
 ```
 
-## 性能摘要
+## 仓库脚本的真实覆盖范围
 
-以下数据来自仓库内最新 5 轮串行复测基线（本地环回，Release + LTO，记录日期：2026-02-13）：
+脚本行为以 `scripts/` 为准，不再夸大：
 
-| 场景 | 参数 | 平均结果 |
-|------|------|----------|
-| 小包 QPS | `200 500 payload=47B threads=4` | 162,234 req/s |
-| 大包吞吐 | `10 200 payload=64KiB threads=1` | 1,981.10 MB/s |
+- `./scripts/run.sh build`
+  - 配置并构建 `build/`
+  - 底层使用 `cmake -S/-B` + `cmake --build`，不再写死 `make`
+  - 显式打开 `BUILD_TESTS=ON`、`BUILD_BENCHMARKS=ON`
+  - `BUILD_EXAMPLES` 依赖默认值，当前默认也是 `ON`
+  - 显式传 `-DBUILD_MODULE_EXAMPLES=OFF`，避免旧缓存把 import 示例重新打开
+  - 可在命令后追加 CMake 参数，例如 `./scripts/run.sh build -G Ninja`
+- `./scripts/run.sh test`
+  - 顺序运行 `T1-SslSocketTest`、`T2-SslLoopbackSmoke`、`T3-SslAdvancedSmoke`
+- `./scripts/run.sh bench`
+  - 委托 `scripts/S1-Bench.sh`
+  - 要求 `build/` 是 `Release + ENABLE_LTO=ON`
+  - 运行固定预设，不等于完整性能评估
+- `./scripts/check.sh`
+  - 重新执行 `T1-SslSocketTest`、`T2-SslLoopbackSmoke`、`T3-SslAdvancedSmoke`
+  - 检查 `B1-SslBenchServer`、`B1-SslBenchClient` 是否存在
+  - 检查证书文件是否复制到 `build/bin/certs`
+  - 不会执行真实吞吐/QPS benchmark
 
-详细口径与历史对照见 [docs/05-性能分析.md](docs/05-性能分析.md)。
+## C++23 Modules 现状
 
-## 文档
+仓库包含模块接口文件：
 
-详细文档见 [docs/](docs/)：
+- `galay-ssl/module/galay.ssl.cppm`
+- `galay-ssl/module/ModulePrelude.hpp`
 
-| 文档 | 说明 |
-|------|------|
-| [01-快速开始](docs/01-快速开始.md) | 依赖、编译、最小可运行示例、错误处理 |
-| [02-使用示例](docs/02-使用示例.md) | 服务端/客户端、证书验证、Session 复用、超时示例 |
-| [03-模块介绍](docs/03-模块介绍.md) | SslContext/SslEngine/SslSocket/Awaitable 模块说明 |
-| [04-运行原理](docs/04-运行原理.md) | Memory BIO 状态机、协程调度流程、资源生命周期 |
-| [05-性能分析](docs/05-性能分析.md) | 压测方法、关键指标、优化建议 |
-| [06-API 文档](docs/06-API文档.md) | 完整 API 参考、接口说明、使用注意事项 |
-| [07-架构设计](docs/07-架构设计.md) | 整体架构、模块职责、Memory BIO 设计、并发模型 |
-| [08-常见问题](docs/08-常见问题.md) | 编译构建、连接握手、证书管理、性能优化问题 |
-| [09-高级主题](docs/09-高级主题.md) | 证书管理、TLS 配置优化、Session 管理、安全加固 |
+真实行为：
+
+- 根工程只在 `BUILD_MODULE_EXAMPLES=ON`、CMake `>= 3.28`、生成器支持模块且编译器侧模块依赖扫描可用时创建 `galay-ssl-modules`
+- import 示例 target 依赖该 target
+- 已安装包不会导出 `galay-ssl-modules`
+- 因此安装后消费的稳定做法仍是头文件方式 `galay-ssl::galay-ssl`
+
+## 已知限制
+
+- 仓库公开头已经提供 ALPN、Session 复用、CA 路径、TLS 版本与 Cipher 配置 API，其中 ALPN / Session 复用 / TLS 版本 / Cipher / CA 路径已有真实测试 target
+- `useDefaultCA()` 仍受运行环境默认信任库影响，仓库没有独立的跨平台 smoke target
+- mTLS 仍没有独立的端到端 `examples/` 或 `test/` target
+- `test/certs/` 内含客户端证书资产，但仓库内没有现成 mTLS 示例 target 使用它们
+- `benchmark` 页如果没有附带新命令输出，则应视为历史或方法说明，而不是“当前最新性能结论”
 
 ## 许可证
 
