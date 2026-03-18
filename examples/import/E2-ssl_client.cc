@@ -14,7 +14,7 @@
 
 import galay.ssl;
 
-#include <galay-kernel/kernel/Coroutine.h>
+#include <galay-kernel/kernel/Task.h>
 
 #ifdef USE_KQUEUE
 #include <galay-kernel/kernel/KqueueScheduler.h>
@@ -30,7 +30,7 @@ using IOSchedulerType = galay::kernel::IOUringScheduler;
 using namespace galay::ssl;
 using namespace galay::kernel;
 
-Coroutine sslClient(SslContext* ctx, const std::string& host, uint16_t port) {
+Task<void> sslClient(SslContext* ctx, const std::string& host, uint16_t port) {
     SslSocket socket(ctx);
 
     if (!socket.isValid()) {
@@ -50,18 +50,10 @@ Coroutine sslClient(SslContext* ctx, const std::string& host, uint16_t port) {
 
     std::cout << "TCP connected, starting SSL handshake..." << std::endl;
 
-    while (!socket.isHandshakeCompleted()) {
-        auto result = co_await socket.handshake();
-        if (!result) {
-            auto& err = result.error();
-            if (err.code() == SslErrorCode::kHandshakeWantRead ||
-                err.code() == SslErrorCode::kHandshakeWantWrite) {
-                continue;
-            }
-            co_await socket.close();
-            co_return;
-        }
-        break;
+    auto result = co_await socket.handshake();
+    if (!result) {
+        co_await socket.close();
+        co_return;
     }
 
     std::cout << "SSL handshake completed!" << std::endl;
@@ -116,7 +108,7 @@ int main(int argc, char* argv[]) {
     IOSchedulerType scheduler;
     scheduler.start();
 
-    scheduler.spawn(sslClient(&ctx, host, port));
+    scheduleTask(scheduler, sslClient(&ctx, host, port));
 
     std::this_thread::sleep_for(std::chrono::seconds(2));
 

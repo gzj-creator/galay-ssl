@@ -18,7 +18,7 @@
 
 import galay.ssl;
 
-#include <galay-kernel/kernel/Coroutine.h>
+#include <galay-kernel/kernel/Task.h>
 
 #ifdef USE_KQUEUE
 #include <galay-kernel/kernel/KqueueScheduler.h>
@@ -44,22 +44,14 @@ void signalHandler(int) {
     g_running = false;
 }
 
-Coroutine handleClient(SslContext* ctx, GHandle handle) {
+Task<void> handleClient(SslContext* ctx, GHandle handle) {
     SslSocket client(ctx, handle);
     client.option().handleNonBlock();
 
-    while (!client.isHandshakeCompleted()) {
-        auto result = co_await client.handshake();
-        if (!result) {
-            auto& err = result.error();
-            if (err.code() == SslErrorCode::kHandshakeWantRead ||
-                err.code() == SslErrorCode::kHandshakeWantWrite) {
-                continue;
-            }
-            co_await client.close();
-            co_return;
-        }
-        break;
+    auto result = co_await client.handshake();
+    if (!result) {
+        co_await client.close();
+        co_return;
     }
 
     std::cout << "Client connected, SSL handshake completed" << std::endl;
@@ -89,7 +81,7 @@ Coroutine handleClient(SslContext* ctx, GHandle handle) {
     co_await client.close();
 }
 
-Coroutine sslEchoServer(IOSchedulerType* scheduler, SslContext* ctx, uint16_t port) {
+Task<void> sslEchoServer(IOSchedulerType* scheduler, SslContext* ctx, uint16_t port) {
     SslSocket listener(ctx);
 
     if (!listener.isValid()) {
@@ -122,7 +114,7 @@ Coroutine sslEchoServer(IOSchedulerType* scheduler, SslContext* ctx, uint16_t po
         }
         std::cout << "New connection from " << clientHost.ip()
                   << ":" << clientHost.port() << std::endl;
-        if (!scheduler->spawn(handleClient(ctx, acceptResult.value()))) {
+        if (!scheduleTask(scheduler, handleClient(ctx, acceptResult.value()))) {
             std::cerr << "spawn failed for client handler" << std::endl;
         }
     }
@@ -162,7 +154,7 @@ int main(int argc, char* argv[]) {
     IOSchedulerType scheduler;
     scheduler.start();
 
-    scheduler.spawn(sslEchoServer(&scheduler, &ctx, port));
+    scheduleTask(scheduler, sslEchoServer(&scheduler, &ctx, port));
 
     std::cout << "Press Ctrl+C to stop server..." << std::endl;
     while (g_running) {

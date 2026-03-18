@@ -5,7 +5,7 @@
 
 #include "galay-ssl/async/SslSocket.h"
 #include "galay-ssl/ssl/SslContext.h"
-#include <galay-kernel/kernel/Coroutine.h>
+#include <galay-kernel/kernel/Task.h>
 #include <iostream>
 #include <atomic>
 #include <csignal>
@@ -39,25 +39,14 @@ void signalHandler(int) {
     g_running = false;
 }
 
-Coroutine handleClient(SslContext* ctx, GHandle handle) {
+Task<void> handleClient(SslContext* ctx, GHandle handle) {
     SslSocket client(ctx, handle);
     client.option().handleNonBlock();
 
-    // SSL 握手 - 需要循环直到完成（SSL 握手是多轮的）
-    while (!client.isHandshakeCompleted()) {
-        auto handshakeResult = co_await client.handshake();
-        if (!handshakeResult) {
-            auto& err = handshakeResult.error();
-            // WantRead/WantWrite 表示需要继续握手
-            if (err.code() == SslErrorCode::kHandshakeWantRead ||
-                err.code() == SslErrorCode::kHandshakeWantWrite) {
-                continue;
-            }
-            // 其他错误则退出
-            co_await client.close();
-            co_return;
-        }
-        break;  // 握手成功
+    auto handshakeResult = co_await client.handshake();
+    if (!handshakeResult) {
+        co_await client.close();
+        co_return;
     }
 
     g_connections++;
@@ -66,12 +55,6 @@ Coroutine handleClient(SslContext* ctx, GHandle handle) {
     while (g_running) {
         auto recvResult = co_await client.recv(buffer, sizeof(buffer));
         if (!recvResult) {
-            auto& err = recvResult.error();
-            // WANT_READ/WANT_WRITE 表示需要继续等待
-            if (err.sslError() == SSL_ERROR_WANT_READ ||
-                err.sslError() == SSL_ERROR_WANT_WRITE) {
-                continue;
-            }
             break;
         }
 
@@ -94,7 +77,7 @@ Coroutine handleClient(SslContext* ctx, GHandle handle) {
     co_await client.close();
 }
 
-Coroutine sslServer(IOScheduler* scheduler, SslContext* ctx, uint16_t port, int backlog) {
+Task<void> sslServer(IOScheduler* scheduler, SslContext* ctx, uint16_t port, int backlog) {
     SslSocket listener(ctx);
 
     if (!listener.isValid()) {
@@ -125,7 +108,7 @@ Coroutine sslServer(IOScheduler* scheduler, SslContext* ctx, uint16_t port, int 
             logErrno("accept failed");
             continue;
         }
-        if (!scheduler->spawn(handleClient(ctx, acceptResult.value()))) {
+        if (!scheduleTask(scheduler, handleClient(ctx, acceptResult.value()))) {
             std::cerr << "spawn failed for client handler" << std::endl;
         }
     }
@@ -168,7 +151,7 @@ int main(int argc, char* argv[]) {
     TestScheduler scheduler;
     scheduler.start();
 
-    scheduler.spawn(sslServer(&scheduler, &ctx, port, backlog));
+    scheduleTask(scheduler, sslServer(&scheduler, &ctx, port, backlog));
 
     while (g_running) {
         std::this_thread::sleep_for(std::chrono::seconds(1));

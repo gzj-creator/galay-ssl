@@ -1,3 +1,10 @@
+/**
+ * @file T3-ssl_single_shot_semantics.cc
+ * @brief 用途：锁定 SSL handshake/shutdown 已切为单次语义 awaitable。
+ * 关键覆盖点：`co_await socket.handshake()` 与 `co_await socket.shutdown()` 不再要求业务层循环处理 WantRead/WantWrite。
+ * 通过条件：客户端与服务端在 loopback 中各自只 await 一次 handshake/shutdown 即完成收发。
+ */
+
 #include "galay-ssl/async/SslSocket.h"
 #include "galay-ssl/ssl/SslContext.h"
 #include <galay-kernel/kernel/Task.h>
@@ -24,8 +31,8 @@ using namespace galay::kernel;
 
 namespace {
 
-constexpr uint16_t kPort = 19443;
-constexpr std::string_view kPayload = "ping-from-test";
+constexpr uint16_t kPort = 19444;
+constexpr std::string_view kPayload = "single-shot-ping";
 
 struct SmokeState {
     std::atomic<bool> serverReady{false};
@@ -87,7 +94,7 @@ Task<void> runServer(IOScheduler* scheduler, SslContext* ctx, SmokeState* state)
 
     auto handshakeResult = co_await client.handshake();
     if (!handshakeResult) {
-        fail(state, "server handshake failed");
+        fail(state, "server single-shot handshake failed");
         co_await client.close();
         co_await listener.close();
         state->serverDone.store(true, std::memory_order_relaxed);
@@ -124,7 +131,7 @@ Task<void> runServer(IOScheduler* scheduler, SslContext* ctx, SmokeState* state)
 
     auto shutdownResult = co_await client.shutdown();
     if (!shutdownResult) {
-        fail(state, "server shutdown failed");
+        fail(state, "server single-shot shutdown failed");
     }
 
     co_await client.close();
@@ -159,7 +166,7 @@ Task<void> runClient(SslContext* ctx, SmokeState* state)
 
     auto handshakeResult = co_await socket.handshake();
     if (!handshakeResult) {
-        fail(state, "client handshake failed");
+        fail(state, "client single-shot handshake failed");
         co_await socket.close();
         state->clientDone.store(true, std::memory_order_relaxed);
         co_return;
@@ -186,7 +193,7 @@ Task<void> runClient(SslContext* ctx, SmokeState* state)
 
     auto shutdownResult = co_await socket.shutdown();
     if (!shutdownResult) {
-        fail(state, "client shutdown failed");
+        fail(state, "client single-shot shutdown failed");
     }
 
     co_await socket.close();
@@ -240,11 +247,11 @@ int main()
     scheduler.stop();
 
     if (state.failed.load(std::memory_order_relaxed)) {
-        throw std::runtime_error(state.failure.empty() ? "loopback smoke failed" : state.failure);
+        throw std::runtime_error(state.failure.empty() ? "single-shot semantics failed" : state.failure);
     }
 
     expect(state.echoed == kPayload, "echoed payload mismatch");
 
-    std::cout << "Loopback smoke PASSED" << std::endl;
+    std::cout << "Single-shot SSL semantics PASSED" << std::endl;
     return 0;
 }

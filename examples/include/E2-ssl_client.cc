@@ -16,7 +16,7 @@
 #include <iostream>
 #include "galay-ssl/async/SslSocket.h"
 #include "galay-ssl/ssl/SslContext.h"
-#include <galay-kernel/kernel/Coroutine.h>
+#include <galay-kernel/kernel/Task.h>
 
 #ifdef USE_KQUEUE
 #include <galay-kernel/kernel/KqueueScheduler.h>
@@ -35,7 +35,7 @@ using namespace galay::kernel;
 /**
  * @brief SSL客户端协程
  */
-Coroutine sslClient(SslContext* ctx, const std::string& host, uint16_t port) {
+Task<void> sslClient(SslContext* ctx, const std::string& host, uint16_t port) {
     SslSocket socket(ctx);
 
     if (!socket.isValid()) {
@@ -56,19 +56,10 @@ Coroutine sslClient(SslContext* ctx, const std::string& host, uint16_t port) {
 
     std::cout << "TCP connected, starting SSL handshake..." << std::endl;
 
-    // SSL握手
-    while (!socket.isHandshakeCompleted()) {
-        auto result = co_await socket.handshake();
-        if (!result) {
-            auto& err = result.error();
-            if (err.code() == SslErrorCode::kHandshakeWantRead ||
-                err.code() == SslErrorCode::kHandshakeWantWrite) {
-                continue;
-            }
-            co_await socket.close();
-            co_return;
-        }
-        break;
+    auto result = co_await socket.handshake();
+    if (!result) {
+        co_await socket.close();
+        co_return;
     }
 
     std::cout << "SSL handshake completed!" << std::endl;
@@ -132,7 +123,7 @@ int main(int argc, char* argv[]) {
     scheduler.start();
 
     // 启动客户端
-    scheduler.spawn(sslClient(&ctx, host, port));
+    scheduleTask(scheduler, sslClient(&ctx, host, port));
 
     // 等待完成
     std::this_thread::sleep_for(std::chrono::seconds(2));

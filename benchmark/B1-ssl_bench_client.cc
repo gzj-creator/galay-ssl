@@ -6,7 +6,7 @@
 #include "galay-ssl/async/SslSocket.h"
 #include "galay-ssl/ssl/SslContext.h"
 #include "SslStats.h"
-#include <galay-kernel/kernel/Coroutine.h>
+#include <galay-kernel/kernel/Task.h>
 #include <iostream>
 #include <atomic>
 #include <csignal>
@@ -73,7 +73,7 @@ void signalHandler(int) {
     g_running = false;
 }
 
-Coroutine sslClient(SslContext* ctx,
+Task<void> sslClient(SslContext* ctx,
                     const std::string& host, uint16_t port,
                     const std::string& message, int requestCount,
                     int connectRetries,
@@ -129,27 +129,16 @@ Coroutine sslClient(SslContext* ctx,
         co_return;
     }
 
-    // SSL 握手 - 需要循环直到完成（SSL 握手是多轮的）
-    while (!socket.isHandshakeCompleted()) {
-        auto handshakeResult = co_await socket.handshake();
-        if (!handshakeResult) {
-            auto& err = handshakeResult.error();
-            // WantRead/WantWrite 表示需要继续握手
-            if (err.code() == SslErrorCode::kHandshakeWantRead ||
-                err.code() == SslErrorCode::kHandshakeWantWrite) {
-                continue;
-            }
-            // 其他错误则退出
-            metrics->errors += 1;
-            metrics->handshake_fail += 1;
-            co_await socket.close();
-            metrics->connections_done += 1;
-            if (thread_done) {
-                (*thread_done)++;
-            }
-            co_return;
+    auto handshakeResult = co_await socket.handshake();
+    if (!handshakeResult) {
+        metrics->errors += 1;
+        metrics->handshake_fail += 1;
+        co_await socket.close();
+        metrics->connections_done += 1;
+        if (thread_done) {
+            (*thread_done)++;
         }
-        break;  // 握手成功
+        co_return;
     }
 
     std::vector<char> buffer(std::min<size_t>(64 * 1024, message.size()));
@@ -177,12 +166,6 @@ Coroutine sslClient(SslContext* ctx,
             auto recvLen = std::min(remaining, buffer.size());
             auto recvResult = co_await socket.recv(buffer.data(), recvLen);
             if (!recvResult) {
-                auto& err = recvResult.error();
-                // WANT_READ/WANT_WRITE 表示需要继续等待
-                if (err.sslError() == SSL_ERROR_WANT_READ ||
-                    err.sslError() == SSL_ERROR_WANT_WRITE) {
-                    continue;
-                }
                 recvFailed = true;
                 metrics->recv_fail += 1;
                 break;
@@ -251,8 +234,8 @@ void runClientThread(const std::string& host, uint16_t port,
 
     // 启动客户端连接
     for (int i = 0; i < connections; i++) {
-        scheduler.spawn(sslClient(&ctx, host, port, message, requestsPerConn,
-                                  connectRetries, &thread_done, &metrics, statsEnabled));
+        scheduleTask(scheduler, sslClient(&ctx, host, port, message, requestsPerConn,
+                                          connectRetries, &thread_done, &metrics, statsEnabled));
     }
 
     // 等待完成
