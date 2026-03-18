@@ -11,6 +11,11 @@
 #include <csignal>
 #include <cerrno>
 #include <cstring>
+#include <algorithm>
+#include <chrono>
+#include <memory>
+#include <thread>
+#include <vector>
 
 #ifdef USE_KQUEUE
 #include <galay-kernel/kernel/KqueueScheduler.h>
@@ -39,6 +44,28 @@ void configureBenchmarkTlsContext(SslContext& ctx) {
     if (ctx.native()) {
         SSL_CTX_set_options(ctx.native(), SSL_OP_NO_TICKET);
     }
+}
+
+std::unique_ptr<SslContext> createBenchmarkServerContext(const std::string& certFile,
+                                                         const std::string& keyFile) {
+    auto ctx = std::make_unique<SslContext>(SslMethod::TLS_1_3_Server);
+    if (!ctx->isValid()) {
+        return nullptr;
+    }
+
+    configureBenchmarkTlsContext(*ctx);
+
+    auto certResult = ctx->loadCertificate(certFile);
+    if (!certResult) {
+        return nullptr;
+    }
+
+    auto keyResult = ctx->loadPrivateKey(keyFile);
+    if (!keyResult) {
+        return nullptr;
+    }
+
+    return ctx;
 }
 
 } // namespace
@@ -89,7 +116,12 @@ Task<void> handleClient(SslContext* ctx, GHandle handle) {
     co_await client.close();
 }
 
-Task<void> sslServer(IOScheduler* scheduler, SslContext* ctx, uint16_t port, int backlog) {
+Task<void> sslServer(IOScheduler* scheduler,
+                     SslContext* ctx,
+                     uint16_t port,
+                     int backlog,
+                     int workerIndex,
+                     int workerCount) {
     SslSocket listener(ctx);
 
     if (!listener.isValid()) {
@@ -97,6 +129,9 @@ Task<void> sslServer(IOScheduler* scheduler, SslContext* ctx, uint16_t port, int
     }
 
     listener.option().handleReuseAddr();
+    if (workerCount > 1) {
+        listener.option().handleReusePort();
+    }
     listener.option().handleNonBlock();
 
     auto bindResult = listener.bind(Host(IPType::IPV4, "0.0.0.0", port));
@@ -111,7 +146,8 @@ Task<void> sslServer(IOScheduler* scheduler, SslContext* ctx, uint16_t port, int
         co_return;
     }
 
-    std::cout << "SSL Server listening on port " << port << std::endl;
+    std::cout << "SSL Server worker " << (workerIndex + 1) << "/" << workerCount
+              << " listening on port " << port << std::endl;
 
     while (g_running) {
         Host clientHost;
@@ -140,38 +176,56 @@ int main(int argc, char* argv[]) {
     if (argc >= 5) {
         backlog = std::max(128, std::stoi(argv[4]));
     }
+    int workerCount = 1;
+    if (argc >= 6) {
+        workerCount = std::max(1, std::stoi(argv[5]));
+    }
 
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);
     signal(SIGPIPE, SIG_IGN);
 
-    SslContext ctx(SslMethod::TLS_1_3_Server);
-    if (!ctx.isValid()) {
-        return 1;
+    struct BenchWorker {
+        std::unique_ptr<SslContext> ctx;
+        std::unique_ptr<TestScheduler> scheduler;
+    };
+
+    std::vector<BenchWorker> workers;
+    workers.reserve(workerCount);
+
+    for (int i = 0; i < workerCount; ++i) {
+        auto ctx = createBenchmarkServerContext(certFile, keyFile);
+        if (!ctx) {
+            return 1;
+        }
+
+        workers.push_back(BenchWorker{
+            .ctx = std::move(ctx),
+            .scheduler = std::make_unique<TestScheduler>(),
+        });
     }
 
-    configureBenchmarkTlsContext(ctx);
+    std::cout << "Starting SSL benchmark server on port " << port
+              << " with " << workerCount << " worker(s)" << std::endl;
 
-    auto certResult = ctx.loadCertificate(certFile);
-    if (!certResult) {
-        return 1;
+    for (int i = 0; i < workerCount; ++i) {
+        workers[static_cast<size_t>(i)].scheduler->start();
+        scheduleTask(*workers[static_cast<size_t>(i)].scheduler,
+                     sslServer(workers[static_cast<size_t>(i)].scheduler.get(),
+                               workers[static_cast<size_t>(i)].ctx.get(),
+                               port,
+                               backlog,
+                               i,
+                               workerCount));
     }
-
-    auto keyResult = ctx.loadPrivateKey(keyFile);
-    if (!keyResult) {
-        return 1;
-    }
-
-    TestScheduler scheduler;
-    scheduler.start();
-
-    scheduleTask(scheduler, sslServer(&scheduler, &ctx, port, backlog));
 
     while (g_running) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
-    scheduler.stop();
+    for (auto it = workers.rbegin(); it != workers.rend(); ++it) {
+        it->scheduler->stop();
+    }
 
     std::cout << "\nFinal stats:" << std::endl;
     std::cout << "Total connections: " << g_connections << std::endl;
