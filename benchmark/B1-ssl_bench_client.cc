@@ -31,6 +31,8 @@ using TestScheduler = galay::kernel::EpollScheduler;
 using namespace galay::ssl;
 using namespace galay::kernel;
 
+namespace {
+
 std::atomic<bool> g_running{true};
 std::atomic<uint64_t> g_requests{0};
 std::atomic<uint64_t> g_bytes_sent{0};
@@ -50,6 +52,8 @@ void configureBenchmarkTlsContext(SslContext& ctx) {
         SSL_CTX_set_options(ctx.native(), SSL_OP_NO_TICKET);
     }
 }
+
+} // namespace
 
 struct ThreadMetrics {
     uint64_t requests = 0;
