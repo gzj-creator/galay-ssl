@@ -31,6 +31,14 @@ std::atomic<uint64_t> g_connections{0};
 std::atomic<uint64_t> g_bytes_recv{0};
 std::atomic<uint64_t> g_bytes_sent{0};
 
+void configureBenchmarkTlsContext(SslContext& ctx) {
+    ctx.setSessionCacheMode(SSL_SESS_CACHE_OFF);
+    ctx.setSessionTimeout(0);
+    if (ctx.native()) {
+        SSL_CTX_set_options(ctx.native(), SSL_OP_NO_TICKET);
+    }
+}
+
 void logErrno(const char* prefix) {
     std::cerr << prefix << ": errno=" << errno << " (" << std::strerror(errno) << ")" << std::endl;
 }
@@ -133,10 +141,12 @@ int main(int argc, char* argv[]) {
     signal(SIGTERM, signalHandler);
     signal(SIGPIPE, SIG_IGN);
 
-    SslContext ctx(SslMethod::TLS_Server);
+    SslContext ctx(SslMethod::TLS_1_3_Server);
     if (!ctx.isValid()) {
         return 1;
     }
+
+    configureBenchmarkTlsContext(ctx);
 
     auto certResult = ctx.loadCertificate(certFile);
     if (!certResult) {

@@ -43,6 +43,14 @@ std::atomic<uint64_t> g_send_fail{0};
 std::atomic<uint64_t> g_recv_fail{0};
 std::atomic<uint64_t> g_peer_closed{0};
 
+void configureBenchmarkTlsContext(SslContext& ctx) {
+    ctx.setSessionCacheMode(SSL_SESS_CACHE_OFF);
+    ctx.setSessionTimeout(0);
+    if (ctx.native()) {
+        SSL_CTX_set_options(ctx.native(), SSL_OP_NO_TICKET);
+    }
+}
+
 struct ThreadMetrics {
     uint64_t requests = 0;
     uint64_t bytes_sent = 0;
@@ -204,13 +212,15 @@ void runClientThread(const std::string& host, uint16_t port,
     ThreadMetrics metrics;
 
     // 创建 SSL 上下文
-    SslContext ctx(SslMethod::TLS_Client);
+    SslContext ctx(SslMethod::TLS_1_3_Client);
     if (!ctx.isValid()) {
         metrics.errors += static_cast<uint64_t>(connections);
         metrics.connections_done += static_cast<uint64_t>(connections);
         mergeThreadMetrics(metrics);
         return;
     }
+
+    configureBenchmarkTlsContext(ctx);
 
     // 加载CA证书，即使不验证（用于建立信任链）
     auto caResult = ctx.loadCACertificate("certs/ca.crt");

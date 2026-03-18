@@ -66,6 +66,17 @@ bash test/certs/generate_certs.sh
 ./build/bin/B1-SslBenchClient 127.0.0.1 8443 200 500 47 4
 ```
 
+## Cross-Language Benchmark Contract
+
+用于和 Rust / Go 服务端做受控对比时，当前 C++ benchmark 固定采用以下口径：
+
+- TLS 版本固定为 `TLS 1.3`
+- 显式关闭会话缓存
+- 显式禁用 session ticket，避免 benchmark 混入 resumption 收益
+- 客户端仍沿用 `SslVerifyMode::None`，结果解释时必须披露
+
+这意味着跨语言对比更接近“TLS 1.3 握手 + 加密 echo”的服务端性能比较，而不是生产安全配置下的端到端真实性能。
+
 ## 输出指标
 
 客户端输出：
