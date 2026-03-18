@@ -94,6 +94,22 @@ func listenWithBacklog(port uint16, backlog int) (net.Listener, error) {
 	return listener, nil
 }
 
+func writeAll(conn net.Conn, payload []byte) error {
+	written := 0
+	for written < len(payload) {
+		n, err := conn.Write(payload[written:])
+		written += n
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+	}
+
+	return nil
+}
+
 func handleConn(conn *tls.Conn) {
 	defer conn.Close()
 
@@ -112,7 +128,7 @@ func handleConn(conn *tls.Conn) {
 			return
 		}
 
-		if _, err := conn.Write(buffer[:n]); err != nil {
+		if err := writeAll(conn, buffer[:n]); err != nil {
 			fmt.Fprintf(os.Stderr, "write error: %v\n", err)
 			return
 		}
