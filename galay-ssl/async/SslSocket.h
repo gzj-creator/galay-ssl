@@ -285,6 +285,8 @@ private:
     bool initEngine();
 
 private:
+    friend class SslOperationDriver;
+
     IOController m_controller;  ///< IO 事件控制器
     SslContext* m_ctx;          ///< SSL 上下文（不拥有）
     SslEngine m_engine;         ///< SSL 引擎

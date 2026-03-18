@@ -18,7 +18,7 @@ target_include_directories(galay-ssl
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}>
-        $<INSTALL_INTERFACE:include/galay-ssl>
+        $<INSTALL_INTERFACE:include>
 )
 
 # 查找平台相关库
