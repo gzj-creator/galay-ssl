@@ -386,7 +386,7 @@ public:
 
     bool await_ready()
     {
-        return m_result_set || m_error.has_value();
+        return m_result_set || m_error.has_value() || SequenceAwaitableBase::m_error.has_value();
     }
 
     template <typename Promise>
@@ -412,6 +412,16 @@ public:
                 using ErrorT = typename detail::expected_traits<result_type>::error_type;
                 if constexpr (std::is_constructible_v<ErrorT, SslError>) {
                     return std::unexpected(ErrorT(*m_error));
+                }
+            }
+        }
+        if (SequenceAwaitableBase::m_error.has_value()) {
+            // Sequence registration can fail immediately before the SSL machine
+            // produces a driver-level SslError. Bridge that base error instead of aborting.
+            if constexpr (detail::is_expected_v<result_type>) {
+                using ErrorT = typename detail::expected_traits<result_type>::error_type;
+                if constexpr (std::is_constructible_v<ErrorT, SslError>) {
+                    return std::unexpected(ErrorT(bridgeSequenceError(*SequenceAwaitableBase::m_error)));
                 }
             }
         }
@@ -549,6 +559,23 @@ private:
     };
 
     static constexpr size_t kInlineTransitionCap = 64;
+
+    static SslError bridgeSequenceError(const IOError& error)
+    {
+        if (IOError::contains(error.code(), kTimeout)) {
+            return SslError(SslErrorCode::kTimeout);
+        }
+        if (IOError::contains(error.code(), kDisconnectError)) {
+            return SslError(SslErrorCode::kPeerClosed);
+        }
+        if (IOError::contains(error.code(), kReadFailed)) {
+            return SslError(SslErrorCode::kReadFailed);
+        }
+        if (IOError::contains(error.code(), kWriteFailed)) {
+            return SslError(SslErrorCode::kWriteFailed);
+        }
+        return SslError(SslErrorCode::kUnknown);
+    }
 
     void setFailure(SslError error)
     {

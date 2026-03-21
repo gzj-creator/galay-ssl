@@ -24,6 +24,9 @@ if(BUILD_TESTS)
     add_executable(T8-SslBuilderProtocol T8-ssl_builder_protocol.cc)
     target_link_libraries(T8-SslBuilderProtocol PRIVATE galay-ssl)
 
+    add_executable(T9-SslSequenceBaseErrorBridge T9-ssl_sequence_base_error_bridge.cc)
+    target_link_libraries(T9-SslSequenceBaseErrorBridge PRIVATE galay-ssl)
+
     # 复制测试证书到 bin 目录和 build 根目录
     file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/certs
          DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
