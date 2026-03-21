@@ -60,6 +60,16 @@ std::array<char, 8> makeFrame()
 }
 
 struct BuilderFlow {
+    explicit BuilderFlow(Scheduler* expected_scheduler = nullptr)
+        : expected_scheduler(expected_scheduler) {}
+
+    void onAwaitContext(const AwaitContext& ctx)
+    {
+        context_bound = true;
+        scheduler_match = ctx.scheduler == expected_scheduler;
+        task_valid = ctx.task.isValid();
+    }
+
     void onHandshake(SslBuilderOps<BuilderResult, 8>& ops, SslHandshakeContext& ctx)
     {
         if (!ctx.m_result) {
@@ -136,6 +146,10 @@ struct BuilderFlow {
     bool parsed_ping = false;
     bool sent_reply = false;
     bool shutdown_ok = false;
+    Scheduler* expected_scheduler = nullptr;
+    bool context_bound = false;
+    bool scheduler_match = false;
+    bool task_valid = false;
 };
 
 struct TestState {
@@ -194,7 +208,7 @@ Task<void> runServer(IOScheduler* scheduler, SslContext* ctx, TestState* state)
     SslSocket client(ctx, accept_result.value());
     client.option().handleNonBlock();
 
-    BuilderFlow flow;
+    BuilderFlow flow(scheduler);
     auto awaitable = SslAwaitableBuilder<BuilderResult, 8, BuilderFlow>(
         client.controller(),
         &client,
@@ -211,6 +225,13 @@ Task<void> runServer(IOScheduler* scheduler, SslContext* ctx, TestState* state)
     auto builder_result = co_await awaitable;
     if (!builder_result || builder_result.value() != "pong") {
         fail(state, "builder protocol failed");
+        co_await client.close();
+        co_await listener.close();
+        state->serverDone.store(true, std::memory_order_relaxed);
+        co_return;
+    }
+    if (!flow.context_bound || !flow.scheduler_match || !flow.task_valid) {
+        fail(state, "builder flow await context missing");
         co_await client.close();
         co_await listener.close();
         state->serverDone.store(true, std::memory_order_relaxed);

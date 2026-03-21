@@ -35,6 +35,7 @@ concept HasFromStateMachine = requires(IOController* controller, SslSocket* sock
 
 static_assert(std::is_same_v<decltype(SslMachineAction<SurfaceResult>::continue_()), SslMachineAction<SurfaceResult>>);
 static_assert(std::is_same_v<decltype(SslMachineAction<SurfaceResult>::complete(SurfaceResult{0})), SslMachineAction<SurfaceResult>>);
+static_assert(std::same_as<decltype(std::declval<AwaitContext>().scheduler), Scheduler*>);
 static_assert(std::constructible_from<SslStateMachineAwaitable<SurfaceMachine>, IOController*, SslSocket*, SurfaceMachine>);
 static_assert(HasFromStateMachine<SslAwaitableBuilder<SurfaceResult>>);
 

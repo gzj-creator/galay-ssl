@@ -7,8 +7,7 @@ namespace galay::ssl
 {
 
 struct SslRecvAwaitable
-    : public SslStateMachineAwaitable<detail::SslSingleRecvMachine>,
-      public TimeoutSupport<SslRecvAwaitable> {
+    : public SslStateMachineAwaitable<detail::SslSingleRecvMachine> {
     using Base = SslStateMachineAwaitable<detail::SslSingleRecvMachine>;
 
     SslRecvAwaitable(IOController* controller, SslSocket* socket,
@@ -18,6 +17,7 @@ struct SslRecvAwaitable
     using Base::await_ready;
     using Base::await_resume;
     using Base::await_suspend;
+    using Base::timeout;
 };
 
 struct SslSendAwaitable : public SslStateMachineAwaitable<detail::SslSingleSendMachine> {

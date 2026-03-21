@@ -11,6 +11,9 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Keep imported package headers ahead of stale default system installs.
+set(CMAKE_NO_SYSTEM_FROM_IMPORTED ON)
+
 # 构建选项
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/option.cmake)
 

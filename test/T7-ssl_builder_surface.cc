@@ -49,16 +49,17 @@ concept HasFromStateMachine = requires(IOController* controller, SslSocket* sock
 
 using ChainedAwaitableT = decltype(
     std::declval<SslAwaitableBuilder<SurfaceResult, 8, SurfaceFlow>&>()
-        .template handshake<&SurfaceFlow::onHandshake>()
-        .template recv<&SurfaceFlow::onRecv>(std::declval<char*>(), std::declval<size_t>())
-        .template parse<&SurfaceFlow::onParse>()
-        .template send<&SurfaceFlow::onSend>(std::declval<const char*>(), std::declval<size_t>())
-        .template shutdown<&SurfaceFlow::onShutdown>()
-        .template finish<&SurfaceFlow::onFinish>()
+        .handshake<&SurfaceFlow::onHandshake>()
+        .recv<&SurfaceFlow::onRecv>(std::declval<char*>(), std::declval<size_t>())
+        .parse<&SurfaceFlow::onParse>()
+        .send<&SurfaceFlow::onSend>(std::declval<const char*>(), std::declval<size_t>())
+        .shutdown<&SurfaceFlow::onShutdown>()
+        .finish<&SurfaceFlow::onFinish>()
         .build()
 );
 
 static_assert(HasFromStateMachine<SslAwaitableBuilder<SurfaceResult>>);
+static_assert(std::same_as<decltype(std::declval<AwaitContext>().scheduler), Scheduler*>);
 static_assert(
     !std::derived_from<std::remove_cvref_t<ChainedAwaitableT>, SequenceAwaitable<SurfaceResult, 8>>,
     "Chained SslAwaitableBuilder::build() should bridge to the SSL state-machine core"

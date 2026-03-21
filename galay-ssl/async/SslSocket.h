@@ -69,6 +69,9 @@ using namespace galay::kernel;
  * - 不可拷贝，仅支持移动语义
  * - 析构时不会自动关闭 socket，需显式调用 close()
  * - 所有异步操作需要在协程中使用 co_await
+ * - 同一个 SslSocket 当前应由单一上层 I/O owner 串行驱动；不要在同一连接上并发挂多个
+ *   SSL sequence/state-machine awaitable（例如一个 reader 协程加一个 writer 协程各自独立 co_await
+ *   SSL 状态机），否则会与底层 controller/SSL 驱动的单 owner 语义冲突
  */
 class SslSocket
 {

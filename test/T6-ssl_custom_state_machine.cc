@@ -37,8 +37,25 @@ constexpr std::string_view kReply = "pong";
 
 using MachineResult = std::expected<std::string, SslError>;
 
+struct AwaitContextCapture {
+    Scheduler* expected_scheduler = nullptr;
+    bool context_bound = false;
+    bool scheduler_match = false;
+    bool task_valid = false;
+};
+
 struct FullExchangeMachine {
     using result_type = MachineResult;
+
+    explicit FullExchangeMachine(AwaitContextCapture* capture = nullptr)
+        : capture(capture) {}
+
+    void onAwaitContext(const AwaitContext& ctx)
+    {
+        capture->context_bound = true;
+        capture->scheduler_match = ctx.scheduler == capture->expected_scheduler;
+        capture->task_valid = ctx.task.isValid();
+    }
 
     SslMachineAction<result_type> advance()
     {
@@ -120,6 +137,7 @@ private:
     std::array<char, 8> m_buffer{};
     std::array<char, 4> m_reply{'p', 'o', 'n', 'g'};
     std::optional<result_type> m_result;
+    AwaitContextCapture* capture = nullptr;
 };
 
 struct TestState {
@@ -178,15 +196,23 @@ Task<void> runServer(IOScheduler* scheduler, SslContext* ctx, TestState* state)
     SslSocket client(ctx, accept_result.value());
     client.option().handleNonBlock();
 
+    AwaitContextCapture capture{.expected_scheduler = scheduler};
     auto awaitable = SslAwaitableBuilder<MachineResult>::fromStateMachine(
         client.controller(),
         &client,
-        FullExchangeMachine{}
+        FullExchangeMachine(&capture)
     ).build();
 
     auto machine_result = co_await awaitable;
     if (!machine_result || machine_result.value() != kReply) {
         fail(state, "full custom machine failed");
+        co_await client.close();
+        co_await listener.close();
+        state->serverDone.store(true, std::memory_order_relaxed);
+        co_return;
+    }
+    if (!capture.context_bound || !capture.scheduler_match || !capture.task_valid) {
+        fail(state, "custom machine await context missing");
         co_await client.close();
         co_await listener.close();
         state->serverDone.store(true, std::memory_order_relaxed);

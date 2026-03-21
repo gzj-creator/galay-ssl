@@ -4,6 +4,7 @@
 #include "galay-ssl/common/Error.h"
 #include <galay-kernel/common/Bytes.h>
 #include <galay-kernel/kernel/Awaitable.h>
+#include <galay-kernel/kernel/Timeout.hpp>
 #include <concepts>
 #include <coroutine>
 #include <cstddef>
@@ -328,6 +329,7 @@ private:
     void setRecvFailure(SslError error);
     void setSendFailure(SslError error);
     void setShutdownSuccess();
+    void clearTransientBuffers();
 
     OperationKind m_operation = OperationKind::kNone;
     SslSocket* m_socket = nullptr;
@@ -363,10 +365,16 @@ private:
         bool wait_read_after_write = false;
         bool read_pending = false;
     } m_shutdown;
+    std::vector<char> m_handshake_buffer;
+    std::vector<char> m_shutdown_buffer;
+    std::vector<char> m_recv_cipher_buffer;
+    std::vector<char> m_send_cipher_buffer;
 };
 
 template <SslAwaitableStateMachine MachineT>
-class SslStateMachineAwaitable : public SequenceAwaitableBase {
+class SslStateMachineAwaitable
+    : public SequenceAwaitableBase
+    , public TimeoutSupport<SslStateMachineAwaitable<MachineT>> {
 public:
     using result_type = typename MachineT::result_type;
 
@@ -379,6 +387,18 @@ public:
     bool await_ready()
     {
         return m_result_set || m_error.has_value();
+    }
+
+    template <typename Promise>
+    bool await_suspend(std::coroutine_handle<Promise> handle)
+    {
+        if (!m_context_bound) {
+            galay::kernel::detail::bindAwaitContextIfSupported(
+                m_machine,
+                galay::kernel::detail::makeAwaitContext(handle));
+            m_context_bound = true;
+        }
+        return SequenceAwaitableBase::await_suspend(handle);
     }
 
     auto await_resume() -> result_type
@@ -416,6 +436,12 @@ public:
     bool empty() const override
     {
         return !m_has_active_task;
+    }
+
+    void markTimeout()
+    {
+        setFailure(SslError(SslErrorCode::kTimeout));
+        clearActiveTask();
     }
 
 #ifdef USE_IOURING
@@ -658,6 +684,7 @@ private:
             if (progress == SequenceProgress::kCompleted) {
                 return progress;
             }
+            continue;
         }
 
         setFailure(SslError(SslErrorCode::kUnknown));
@@ -672,6 +699,7 @@ private:
     bool m_has_active_task = false;
     ActiveKind m_active_kind = ActiveKind::kNone;
     SslMachineSignal m_running_signal = SslMachineSignal::kContinue;
+    bool m_context_bound = false;
     std::optional<result_type> m_result;
     bool m_result_set = false;
     std::optional<SslError> m_error;
@@ -907,6 +935,17 @@ public:
         node.parse_handler = &invokeParse<Handler>;
         node.parse_rearm_recv_index = rearm_recv_index;
         return node;
+    }
+
+    void onAwaitContext(const AwaitContext& ctx)
+    {
+        if constexpr (requires(FlowT& flow, const AwaitContext& context) {
+            flow.onAwaitContext(context);
+        }) {
+            if (m_flow != nullptr) {
+                m_flow->onAwaitContext(ctx);
+            }
+        }
     }
 
     SslMachineAction<result_type> advance()
