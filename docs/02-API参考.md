@@ -258,8 +258,8 @@
 - include 示例：`examples/include/E1-ssl_echo_server.cc`、`examples/include/E2-ssl_client.cc`
 - import 示例：`examples/import/E1-ssl_echo_server.cc`、`examples/import/E2-ssl_client.cc`
 - 测试入口统一位于 `test/`，用于交叉验证 socket、loopback、advanced TLS 行为
-- socket / loopback / advanced smoke：`test/T1-ssl_socket_test.cc`、`test/T2-ssl_loopback_smoke.cc`、`test/T3-ssl_advanced_smoke.cc`
-- 文档 / 契约检查：`test/T4-review_contracts.sh`
+- socket / loopback / advanced smoke：`test/T1-ssl_socket_test.cc`、`test/T2-ssl_loopback_smoke.cc`、`test/T3-ssl_single_shot_semantics.cc`
+- 状态机 / builder / 错误桥接回归：`test/T4-ssl_state_machine_surface.cc`、`test/T5-ssl_recv_send_state_machine.cc`、`test/T6-ssl_custom_state_machine.cc`、`test/T7-ssl_builder_surface.cc`、`test/T8-ssl_builder_protocol.cc`、`test/T9-ssl_sequence_base_error_bridge.cc`
 
 ## 当前 API 边界
 

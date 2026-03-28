@@ -10,11 +10,14 @@ BIN_DIR="$BUILD_DIR/bin"
 
 build_project() {
     echo "Building project..."
-    mkdir -p "$BUILD_DIR"
-    cd "$BUILD_DIR"
-    cmake .. -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=ON -DBUILD_TESTS=ON -DBUILD_BENCHMARKS=ON
-    make -j$(sysctl -n hw.ncpu 2>/dev/null || nproc)
-    cd "$PROJECT_DIR"
+    cmake -S "$PROJECT_DIR" -B "$BUILD_DIR" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DENABLE_LTO=ON \
+        -DBUILD_TESTING=ON \
+        -DBUILD_BENCHMARKS=ON \
+        -DBUILD_MODULE_EXAMPLES=OFF \
+        "$@"
+    cmake --build "$BUILD_DIR" --parallel
 }
 
 run_tests() {
@@ -23,23 +26,19 @@ run_tests() {
     echo "  Running Unit Tests"
     echo "=========================================="
 
-    if [ ! -f "$BIN_DIR/T1-SslSocketTest" ]; then
-        echo "ERROR: Test binary not found. Building first..."
+    if [ ! -f "$BUILD_DIR/CTestTestfile.cmake" ]; then
+        echo "ERROR: CTest metadata not found. Building first..."
         build_project
     fi
 
-    cd "$BIN_DIR"
-    ./T1-SslSocketTest
-    local result=$?
-    cd "$PROJECT_DIR"
-
-    return $result
+    ctest --test-dir "$BUILD_DIR" --output-on-failure
 }
 
 main() {
     case "${1:-test}" in
         build)
-            build_project
+            shift
+            build_project "$@"
             ;;
         test)
             run_tests
@@ -48,7 +47,8 @@ main() {
             "$SCRIPT_DIR/S1-Bench.sh"
             ;;
         all)
-            build_project
+            shift
+            build_project "$@"
             run_tests
             "$SCRIPT_DIR/S1-Bench.sh"
             ;;

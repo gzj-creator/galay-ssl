@@ -65,7 +65,8 @@ cmake --build build --parallel
 
 说明：
 
-- `BUILD_TESTS`、`BUILD_BENCHMARKS`、`BUILD_EXAMPLES` 默认都是 `ON`
+- `BUILD_TESTING` 默认 `OFF`；`BUILD_TESTS` 仅作为兼容别名保留，默认也为 `OFF`
+- `BUILD_BENCHMARKS`、`BUILD_EXAMPLES` 默认都是 `ON`
 - `BUILD_MODULE_EXAMPLES` 默认 `OFF`，这样默认构建在 CMake `>= 3.16` 时不会因为 modules 而硬失败
 - 如果你要生成 import 示例，需要显式传 `-DBUILD_MODULE_EXAMPLES=ON`
 - 仅有 CMake `>= 3.28` + `Ninja` / `Visual Studio` 还不够；还必须有编译器侧的模块依赖扫描能力
@@ -119,7 +120,7 @@ int main() {
 | import 示例 | `examples/import/E2-ssl_client.cc` | `E2-SslClient-Import` | 仅在模块工具链满足时生成 |
 | 测试 | `test/T1-ssl_socket_test.cc` | `T1-SslSocketTest` | 脚本会运行 |
 | 测试 | `test/T2-ssl_loopback_smoke.cc` | `T2-SslLoopbackSmoke` | 脚本会运行 |
-| 测试 | `test/T3-ssl_advanced_smoke.cc` | `T3-SslAdvancedSmoke` | 脚本会运行 |
+| 测试 | `test/T3-ssl_single_shot_semantics.cc` | `T3-SslSingleShotSemantics` | 脚本会运行 |
 | benchmark | `benchmark/B1-ssl_bench_server.cc` | `B1-SslBenchServer` | 可构建，可运行 |
 | benchmark | `benchmark/B1-ssl_bench_client.cc` | `B1-SslBenchClient` | 可构建，可运行 |
 
@@ -134,9 +135,10 @@ int main() {
 ./build/bin/E2-SslClient-Include localhost 8443 certs/ca.crt
 
 # 测试
+ctest --test-dir build --output-on-failure
 ./build/bin/T1-SslSocketTest
 ./build/bin/T2-SslLoopbackSmoke
-./build/bin/T3-SslAdvancedSmoke
+./build/bin/T3-SslSingleShotSemantics
 
 # benchmark
 ./build/bin/B1-SslBenchServer 8443 certs/server.crt certs/server.key
@@ -150,18 +152,19 @@ int main() {
 - `./scripts/run.sh build`
   - 配置并构建 `build/`
   - 底层使用 `cmake -S/-B` + `cmake --build`，不再写死 `make`
-  - 显式打开 `BUILD_TESTS=ON`、`BUILD_BENCHMARKS=ON`
+  - 显式打开 `BUILD_TESTING=ON`、`BUILD_BENCHMARKS=ON`
   - `BUILD_EXAMPLES` 依赖默认值，当前默认也是 `ON`
   - 显式传 `-DBUILD_MODULE_EXAMPLES=OFF`，避免旧缓存把 import 示例重新打开
   - 可在命令后追加 CMake 参数，例如 `./scripts/run.sh build -G Ninja`
 - `./scripts/run.sh test`
-  - 顺序运行 `T1-SslSocketTest`、`T2-SslLoopbackSmoke`、`T3-SslAdvancedSmoke`
+  - 执行 `ctest --test-dir build --output-on-failure`
+  - 当前会覆盖 `T1-SslSocketTest` 到 `T9-SslSequenceBaseErrorBridge`
 - `./scripts/run.sh bench`
   - 委托 `scripts/S1-Bench.sh`
   - 要求 `build/` 是 `Release + ENABLE_LTO=ON`
   - 运行固定预设，不等于完整性能评估
 - `./scripts/check.sh`
-  - 重新执行 `T1-SslSocketTest`、`T2-SslLoopbackSmoke`、`T3-SslAdvancedSmoke`
+  - 重新执行 `ctest --test-dir build --output-on-failure`
   - 检查 `B1-SslBenchServer`、`B1-SslBenchClient` 是否存在
   - 检查证书文件是否复制到 `build/bin/certs`
   - 不会执行真实吞吐/QPS benchmark

@@ -14,26 +14,12 @@ check_tests() {
     echo "  Checking Test Results"
     echo "=========================================="
 
-    if [ ! -f "$BIN_DIR/T1-SslSocketTest" ]; then
-        echo "ERROR: Test binary not found."
+    if [ ! -f "$BUILD_DIR/CTestTestfile.cmake" ]; then
+        echo "ERROR: CTest metadata not found."
         return 1
     fi
 
-    cd "$BIN_DIR"
-    local output
-    output=$(./T1-SslSocketTest 2>&1)
-    local result=$?
-    cd "$PROJECT_DIR"
-
-    local passed=$(echo "$output" | grep "Passed:" | awk '{print $2}')
-    local failed=$(echo "$output" | grep "Failed:" | awk '{print $2}')
-
-    echo "Test Results: $passed passed, $failed failed"
-
-    if [ "$failed" != "0" ] || [ $result -ne 0 ]; then
-        echo "FAILED: Some tests did not pass"
-        return 1
-    fi
+    ctest --test-dir "$BUILD_DIR" --output-on-failure
 
     echo "PASSED: All tests passed"
     return 0
