@@ -48,7 +48,7 @@
 | 编译器 | C++23 | 仓库代码使用 `std::expected` 与协程 |
 | CMake | `>= 3.16` | 默认源码构建（库 / tests / benchmarks / include 示例） |
 | OpenSSL | 开发包可发现 | `find_package(OpenSSL REQUIRED)` |
-| `galay-kernel` | 必需 | `find_package(galay-kernel REQUIRED)` |
+| `galay-kernel` | 必需 | `find_package(galay-kernel 3.4.4 REQUIRED CONFIG)` |
 | `liburing` | Linux 可选 | 缺失时自动回退 `epoll` |
 | Modules | CMake `>= 3.28` + 支持模块扫描的生成器/编译器 | 仅影响 `galay-ssl-modules` 与 import 示例 |
 
@@ -59,7 +59,8 @@
 ```bash
 cmake -S . -B build \
   -DCMAKE_BUILD_TYPE=Release \
-  -DENABLE_LTO=ON
+  -DENABLE_LTO=ON \
+  -DCMAKE_PREFIX_PATH=/Users/gongzhijie/Desktop/projects/git/galay-kernel/_install-smoke-344
 cmake --build build --parallel
 ```
 
@@ -73,6 +74,7 @@ cmake --build build --parallel
 - 当前根工程会在扫描能力缺失时给出 warning 并自动关闭 `BUILD_MODULE_EXAMPLES`
 - 已实测：macOS `AppleClang 17` + CMake `4.0.2` + `Ninja` 在缺少扫描能力时不会生成 import 示例
 - Linux 上可用 `-DDISABLE_IOURING=ON` 强制回退到 `epoll`
+- 根工程会优先尝试 sibling `galay-kernel` 前缀：`../galay-kernel/install-local`、`../galay-kernel/_install-smoke-344`、`../galay-kernel/_install-smoke`
 
 ## 安装与消费
 
@@ -104,7 +106,7 @@ int main() {
 
 消费链路说明：
 
-- `galay-ssl-config.cmake` 会自动 `find_dependency(OpenSSL REQUIRED)` 与 `find_dependency(galay-kernel REQUIRED)`
+- `galay-ssl-config.cmake` 会自动 `find_dependency(OpenSSL REQUIRED)` 与 `find_dependency(galay-kernel 3.4.4 REQUIRED CONFIG)`
 - 本次文档修复期间已重新验证 `cmake --install` + `find_package(galay-ssl REQUIRED)` + 上述 include 写法可以真实编译通过
 - 已安装包当前只导出 `galay-ssl::galay-ssl`；没有导出 `galay-ssl::galay-ssl-modules`
 
@@ -163,6 +165,10 @@ ctest --test-dir build --output-on-failure
   - 委托 `scripts/S1-Bench.sh`
   - 要求 `build/` 是 `Release + ENABLE_LTO=ON`
   - 运行固定预设，不等于完整性能评估
+- `./scripts/run.sh bench-compare`
+  - 委托 `scripts/S2-Bench-Rust-Compare.sh`
+  - 在固定场景下分别运行 C++ 与 Rust TLS benchmark，并汇总 `Requests/sec` 与 `Throughput`
+  - Rust 对照源码位于 `benchmark/compare/rust/`
 - `./scripts/check.sh`
   - 重新执行 `ctest --test-dir build --output-on-failure`
   - 检查 `B1-SslBenchServer`、`B1-SslBenchClient` 是否存在

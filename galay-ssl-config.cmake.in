@@ -4,7 +4,7 @@ include(CMakeFindDependencyMacro)
 
 # 查找依赖
 find_dependency(OpenSSL REQUIRED)
-find_dependency(galay-kernel REQUIRED)
+find_dependency(galay-kernel 3.4.4 REQUIRED CONFIG)
 
 # 包含目标文件
 include("${CMAKE_CURRENT_LIST_DIR}/galay-ssl-targets.cmake")

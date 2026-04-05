@@ -5,3 +5,4 @@ build-*/
 .claude/
 .crosslang-bench-results/
 test_results/
+benchmark/compare/rust/target/

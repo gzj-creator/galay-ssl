@@ -46,6 +46,9 @@ main() {
         bench)
             "$SCRIPT_DIR/S1-Bench.sh"
             ;;
+        bench-compare)
+            "$SCRIPT_DIR/S2-Bench-Rust-Compare.sh"
+            ;;
         all)
             shift
             build_project "$@"
@@ -53,7 +56,7 @@ main() {
             "$SCRIPT_DIR/S1-Bench.sh"
             ;;
         *)
-            echo "Usage: $0 {build|test|bench|all}"
+            echo "Usage: $0 {build|test|bench|bench-compare|all}"
             exit 1
             ;;
     esac

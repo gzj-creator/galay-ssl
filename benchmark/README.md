@@ -98,3 +98,18 @@ GALAY_SSL_STATS=1 ./build/bin/B1-SslBenchClient 127.0.0.1 8443 50 200 47 4
 - 客户端默认 `SslVerifyMode::None`（压测口径），不是生产安全配置
 - 建议统一使用 `Release + LTO`，避免构建口径造成数据偏差
 - 默认远端 CPU 绑定建议是 `server=0-1`、`client=2-3`；如果远端规格不同，请按实际 CPU 拓扑调整
+
+## Rust 最小对照
+
+仓库提供 Rust TLS echo 对照实现（用于同场景 benchmark 对比）：
+
+- `benchmark/compare/rust/src/bin/rust_ssl_bench_server.rs`
+- `benchmark/compare/rust/src/bin/rust_ssl_bench_client.rs`
+
+一键对比命令：
+
+```bash
+./scripts/run.sh bench-compare
+```
+
+该命令会先跑 C++ benchmark，再跑 Rust benchmark，并输出 `Requests/sec` 与 `Throughput` 对比摘要。
