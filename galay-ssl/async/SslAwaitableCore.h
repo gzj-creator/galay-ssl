@@ -315,6 +315,7 @@ private:
     void onHandshakeWrite(std::expected<size_t, IOError> result);
     void onRecvRead(std::expected<size_t, IOError> result);
     void onRecvWrite(std::expected<size_t, IOError> result);
+    void onSendRead(std::expected<size_t, IOError> result);
     void onSendWrite(std::expected<size_t, IOError> result);
     void onShutdownRead(std::expected<size_t, IOError> result);
     void onShutdownWrite(std::expected<size_t, IOError> result);
@@ -355,6 +356,7 @@ private:
         const char* plain_buffer = nullptr;
         size_t plain_length = 0;
         size_t plain_offset = 0;
+        bool read_pending = false;
         bool result_set = false;
         std::expected<size_t, SslError> result{};
     } m_send;
@@ -450,8 +452,31 @@ public:
 
     void markTimeout()
     {
-        setFailure(SslError(SslErrorCode::kTimeout));
         clearActiveTask();
+        const auto timeout = std::unexpected(SslError(SslErrorCode::kTimeout));
+        switch (m_running_signal) {
+        case SslMachineSignal::kHandshake:
+            m_machine.onHandshake(std::expected<void, SslError>(timeout));
+            break;
+        case SslMachineSignal::kRecv:
+            m_machine.onRecv(std::expected<Bytes, SslError>(timeout));
+            break;
+        case SslMachineSignal::kSend:
+            m_machine.onSend(std::expected<size_t, SslError>(timeout));
+            break;
+        case SslMachineSignal::kShutdown:
+            m_machine.onShutdown(std::expected<void, SslError>(timeout));
+            break;
+        case SslMachineSignal::kContinue:
+        case SslMachineSignal::kComplete:
+        case SslMachineSignal::kFail:
+            break;
+        }
+        m_running_signal = SslMachineSignal::kContinue;
+        (void)pump();
+        if (!m_result_set && !m_error.has_value()) {
+            setFailure(SslError(SslErrorCode::kTimeout));
+        }
     }
 
 #ifdef USE_IOURING
