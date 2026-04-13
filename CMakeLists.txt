@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(galay-ssl VERSION 1.2.1 LANGUAGES CXX)
+project(galay-ssl VERSION 1.2.2 LANGUAGES CXX)
 
 if(POLICY CMP0069)
     cmake_policy(SET CMP0069 NEW)

@@ -39,6 +39,18 @@ const SSL_METHOD* getMethod(SslMethod method) {
     }
 }
 
+bool isServerMethod(SslMethod method) {
+    switch (method) {
+        case SslMethod::TLS_Server:
+        case SslMethod::TLS_1_2_Server:
+        case SslMethod::TLS_1_3_Server:
+        case SslMethod::DTLS_Server:
+            return true;
+        default:
+            return false;
+    }
+}
+
 } // anonymous namespace
 
 SslContext::SslContext(SslMethod method)
@@ -58,6 +70,13 @@ SslContext::SslContext(SslMethod method)
     // 启用 Session 缓存以提高性能（减少完整握手次数）
     SSL_CTX_set_session_cache_mode(m_ctx, SSL_SESS_CACHE_BOTH);
     SSL_CTX_set_timeout(m_ctx, 300);  // Session 有效期 5 分钟
+
+    // Default server contexts prioritize steady-state throughput and avoid
+    // post-handshake TLS 1.3 session ticket traffic on long-lived connections.
+    if (isServerMethod(method)) {
+        SSL_CTX_set_options(m_ctx, SSL_OP_NO_TICKET);
+        SSL_CTX_set_num_tickets(m_ctx, 0);
+    }
 
     // 根据方法设置版本限制
     switch (method) {

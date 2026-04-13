@@ -413,7 +413,15 @@ bool SslOperationDriver::fillSendChunk()
             continue;
         }
 
-        if ((ssl_ret == SslIOResult::WantRead || ssl_ret == SslIOResult::WantWrite) &&
+        if (ssl_ret == SslIOResult::WantRead) {
+            if (m_socket->m_engine.pendingEncryptedOutput() > 0) {
+                continue;
+            }
+            m_send.read_pending = true;
+            return false;
+        }
+
+        if (ssl_ret == SslIOResult::WantWrite &&
             m_socket->m_engine.pendingEncryptedOutput() > 0) {
             continue;
         }
@@ -540,6 +548,14 @@ SslOperationDriver::WaitAction SslOperationDriver::pollSend()
     if (m_send.result_set) {
         return {};
     }
+    if (m_send.read_pending) {
+        if (!prepareReadBuffer(m_send_cipher_buffer)) {
+            setSendFailure(SslError(SslErrorCode::kWriteFailed));
+            return {};
+        }
+        m_send.read_pending = false;
+        return {WaitKind::kRead, &m_recv_context};
+    }
     if (m_send_context.m_length > 0) {
         return {WaitKind::kWrite, &m_send_context};
     }
@@ -612,10 +628,12 @@ void SslOperationDriver::onRead(std::expected<size_t, IOError> result)
     case OperationKind::kRecv:
         onRecvRead(std::move(result));
         return;
+    case OperationKind::kSend:
+        onSendRead(std::move(result));
+        return;
     case OperationKind::kShutdown:
         onShutdownRead(std::move(result));
         return;
-    case OperationKind::kSend:
     case OperationKind::kNone:
         setSendFailure(SslError(SslErrorCode::kWriteFailed));
         return;
@@ -733,6 +751,18 @@ void SslOperationDriver::onRecvWrite(std::expected<size_t, IOError> result)
 
     if (m_socket->m_engine.pendingEncryptedOutput() > 0) {
         prepareRecvSendChunk();
+    }
+}
+
+void SslOperationDriver::onSendRead(std::expected<size_t, IOError> result)
+{
+    if (!result || result.value() == 0) {
+        setSendFailure(SslError(SslErrorCode::kWriteFailed));
+        return;
+    }
+
+    if (m_socket->m_engine.feedEncryptedInput(m_recv_context.m_buffer, result.value()) <= 0) {
+        setSendFailure(SslError(SslErrorCode::kWriteFailed));
     }
 }
 
