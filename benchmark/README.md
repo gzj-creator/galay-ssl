@@ -4,12 +4,12 @@
 
 ## 测试程序
 
-### B1-SslBenchServer
+### b1_server
 
 SSL Echo 服务端。
 
 ```bash
-./build/bin/B1-SslBenchServer <port> <cert_file> <key_file> [backlog] [worker_count]
+./build/bin/b1_server <port> <cert_file> <key_file> [backlog] [worker_count]
 ```
 
 参数：
@@ -23,16 +23,16 @@ SSL Echo 服务端。
 示例：
 
 ```bash
-./build/bin/B1-SslBenchServer 8443 certs/server.crt certs/server.key
-./build/bin/B1-SslBenchServer 8443 certs/server.crt certs/server.key 4096 4
+./build/bin/b1_server 8443 certs/server.crt certs/server.key
+./build/bin/b1_server 8443 certs/server.crt certs/server.key 4096 4
 ```
 
-### B1-SslBenchClient
+### b1_client
 
 SSL 压测客户端。
 
 ```bash
-./build/bin/B1-SslBenchClient <host> <port> <connections> <requests_per_conn> [payload_bytes] [threads] [connect_retries]
+./build/bin/b1_client <host> <port> <connections> <requests_per_conn> [payload_bytes] [threads] [connect_retries]
 ```
 
 参数：
@@ -49,10 +49,10 @@ SSL 压测客户端。
 
 ```bash
 # 小包（默认 47B）
-./build/bin/B1-SslBenchClient 127.0.0.1 8443 200 500 47 4
+./build/bin/b1_client 127.0.0.1 8443 200 500 47 4
 
 # 大包（64KiB）
-./build/bin/B1-SslBenchClient 127.0.0.1 8443 10 200 65536 1
+./build/bin/b1_client 127.0.0.1 8443 10 200 65536 1
 ```
 
 ## 推荐流程
@@ -62,10 +62,10 @@ SSL 压测客户端。
 bash test/certs/generate_certs.sh
 
 # 2) 启动服务端
-./build/bin/B1-SslBenchServer 8443 certs/server.crt certs/server.key 4096 4
+./build/bin/b1_server 8443 certs/server.crt certs/server.key 4096 4
 
 # 3) 启动客户端（另一个终端）
-./build/bin/B1-SslBenchClient 127.0.0.1 8443 200 500 47 4
+./build/bin/b1_client 127.0.0.1 8443 200 500 47 4
 ```
 
 ## 输出指标
@@ -83,7 +83,7 @@ bash test/certs/generate_certs.sh
 可选统计（仅 benchmark 侧）：
 
 ```bash
-GALAY_SSL_STATS=1 ./build/bin/B1-SslBenchClient 127.0.0.1 8443 50 200 47 4
+GALAY_SSL_STATS=1 ./build/bin/b1_client 127.0.0.1 8443 50 200 47 4
 ```
 
 会额外输出：

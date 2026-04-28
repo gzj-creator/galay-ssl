@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(galay-ssl VERSION 1.2.2 LANGUAGES CXX)
+project(galay-ssl VERSION 2.0.0 LANGUAGES CXX)
 
 if(POLICY CMP0069)
     cmake_policy(SET CMP0069 NEW)
@@ -133,7 +133,7 @@ message(STATUS "OpenSSL include dir: ${OPENSSL_INCLUDE_DIR}")
 message(STATUS "OpenSSL libraries: ${OPENSSL_LIBRARIES}")
 
 # 查找 galay-kernel（支持动态库和静态库）
-find_package(galay-kernel 3.4.4 REQUIRED CONFIG)
+find_package(galay-kernel 4.0.0 REQUIRED CONFIG)
 if(NOT galay-kernel_FOUND)
     message(FATAL_ERROR "galay-kernel not found. Please install galay-kernel first.")
 endif()
@@ -152,7 +152,7 @@ if(BUILD_MODULE_EXAMPLES
         PUBLIC
             FILE_SET CXX_MODULES
             FILES
-                "${CMAKE_CURRENT_SOURCE_DIR}/galay-ssl/module/galay.ssl.cppm"
+                "${CMAKE_CURRENT_SOURCE_DIR}/galay-ssl/module/galay_ssl.cppm"
     )
 endif()
 

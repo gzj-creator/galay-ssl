@@ -2,29 +2,29 @@
 
 本页按公开头文件整理 API，源头如下：
 
-- `galay-ssl/common/Defn.hpp`
-- `galay-ssl/common/Error.h`
-- `galay-ssl/ssl/SslContext.h`
-- `galay-ssl/ssl/SslEngine.h`
-- `galay-ssl/async/SslSocket.h`
+- `galay-ssl/common/defn.hpp`
+- `galay-ssl/common/error.h`
+- `galay-ssl/ssl/ssl_context.h`
+- `galay-ssl/ssl/ssl_engine.h`
+- `galay-ssl/async/ssl_socket.h`
 
 ## 公开头文件与模块入口
 
 | 路径 | 角色 | 说明 |
 | --- | --- | --- |
-| `galay-ssl/common/Defn.hpp` | 基础枚举与类型别名 | `SslMethod`、`SslVerifyMode`、`SslHandshakeState`、`SslIOResult`、`SslFileType` |
-| `galay-ssl/common/Error.h` | 错误模型 | `SslErrorCode`、`SslError` |
-| `galay-ssl/ssl/SslContext.h` | 进程级 / 配置级 TLS 上下文 | 证书、CA、验证、cipher、ALPN、session cache |
-| `galay-ssl/ssl/SslEngine.h` | 单连接低层 TLS 引擎 | Memory BIO、握手、读写、session 细节 |
-| `galay-ssl/async/SslSocket.h` | 协程业务入口 | bind/listen/connect/handshake/recv/send/shutdown/close |
-| `galay-ssl/module/ModulePrelude.hpp` | 模块前置头 | 供 `galay.ssl.cppm` 复用，不额外导出业务 API |
-| `galay-ssl/module/galay.ssl.cppm` | C++23 模块接口 | `import galay.ssl;` 的真实模块文件 |
+| `galay-ssl/common/defn.hpp` | 基础枚举与类型别名 | `SslMethod`、`SslVerifyMode`、`SslHandshakeState`、`SslIOResult`、`SslFileType` |
+| `galay-ssl/common/error.h` | 错误模型 | `SslErrorCode`、`SslError` |
+| `galay-ssl/ssl/ssl_context.h` | 进程级 / 配置级 TLS 上下文 | 证书、CA、验证、cipher、ALPN、session cache |
+| `galay-ssl/ssl/ssl_engine.h` | 单连接低层 TLS 引擎 | Memory BIO、握手、读写、session 细节 |
+| `galay-ssl/async/ssl_socket.h` | 协程业务入口 | bind/listen/connect/handshake/recv/send/shutdown/close |
+| `galay-ssl/module/module_prelude.hpp` | 模块前置头 | 供 `galay_ssl.cppm` 复用，不额外导出业务 API |
+| `galay-ssl/module/galay_ssl.cppm` | C++23 模块接口 | `import galay.ssl;` 的真实模块文件 |
 
 导出边界：
 
 - 安装包稳定导出 target：`galay-ssl::galay-ssl`
 - 条件生成但**安装包不导出**的模块 target：`galay-ssl-modules`
-- `galay-ssl/async/Awaitable.h` 是 `SslSocket.h` 的实现支撑头，不是稳定独立入口
+- `galay-ssl/async/awaitable.h` 是 `ssl_socket.h` 的实现支撑头，不是稳定独立入口
 
 ## 基础枚举
 
@@ -69,7 +69,7 @@
 
 ## `SslErrorCode`
 
-以下错误码定义在 `galay-ssl/common/Error.h`：
+以下错误码定义在 `galay-ssl/common/error.h`：
 
 - `kSuccess`
 - `kContextCreateFailed`
@@ -105,7 +105,7 @@
 
 ## `SslContext`
 
-头文件：`galay-ssl/ssl/SslContext.h`
+头文件：`galay-ssl/ssl/ssl_context.h`
 
 ### 生命周期与状态
 
@@ -140,7 +140,7 @@
 
 ## `SslEngine`
 
-头文件：`galay-ssl/ssl/SslEngine.h`
+头文件：`galay-ssl/ssl/ssl_engine.h`
 
 `SslEngine` 是单连接级低层 API；如果只是写业务协程，优先使用 `SslSocket`。
 
@@ -190,15 +190,15 @@
 
 `SslSocket::handshake()` / `recv()` / `send()` / `shutdown()` 会返回 `galay::ssl::*Awaitable` 对象。
 
-- 这些类型定义在 `galay-ssl/async/Awaitable.h`
-- 该头文件由 `SslSocket.h` 传递包含，用来满足编译需要
+- 这些类型定义在 `galay-ssl/async/awaitable.h`
+- 该头文件由 `ssl_socket.h` 传递包含，用来满足编译需要
 - 这层属于协程桥接细节，不应视为稳定的独立消费入口
 - 业务代码应直接 `co_await socket.handshake()` / `recv()` / `send()` / `shutdown()`，而不是依赖其内部状态机辅助类型
-- `RecvCtx` / `SendCtx` / `HandshakeRecvCtx` / `HandshakeSendCtx` / `ShutdownRecvCtx` / `ShutdownSendCtx` 以及 `ReadAction` / `SendChunkState` 都是 `Awaitable.h` 中的内部状态机辅助类型，不属于独立 API 面
+- `RecvCtx` / `SendCtx` / `HandshakeRecvCtx` / `HandshakeSendCtx` / `ShutdownRecvCtx` / `ShutdownSendCtx` 以及 `ReadAction` / `SendChunkState` 都是 `awaitable.h` 中的内部状态机辅助类型，不属于独立 API 面
 
 ## `SslSocket`
 
-头文件：`galay-ssl/async/SslSocket.h`
+头文件：`galay-ssl/async/ssl_socket.h`
 
 `SslSocket` 依赖 `galay-kernel` 中的 `Host`、`IPType`、`GHandle`、`IOController` 与若干 awaitable 类型；其中 SSL 专用 awaitable 现已收敛到 `galay::ssl` 命名空间。
 
@@ -255,17 +255,17 @@
 
 ## 交叉验证入口
 
-- include 示例：`examples/include/E1-ssl_echo_server.cc`、`examples/include/E2-ssl_client.cc`
-- import 示例：`examples/import/E1-ssl_echo_server.cc`、`examples/import/E2-ssl_client.cc`
+- include 示例：`examples/include/e1_echo.cc`、`examples/include/e2_echo.cc`
+- import 示例：`examples/import/e1_echo.cc`、`examples/import/e2_echo.cc`
 - 测试入口统一位于 `test/`，用于交叉验证 socket、loopback、advanced TLS 行为
-- socket / loopback / advanced smoke：`test/T1-ssl_socket_test.cc`、`test/T2-ssl_loopback_smoke.cc`、`test/T3-ssl_single_shot_semantics.cc`
-- 状态机 / builder / 错误桥接回归：`test/T4-ssl_state_machine_surface.cc`、`test/T5-ssl_recv_send_state_machine.cc`、`test/T6-ssl_custom_state_machine.cc`、`test/T7-ssl_builder_surface.cc`、`test/T8-ssl_builder_protocol.cc`、`test/T9-ssl_sequence_base_error_bridge.cc`
+- socket / loopback / advanced smoke：`test/t1_socket.cc`、`test/t2_loopback.cc`、`test/t3_policy.cc`
+- 状态机 / builder / 错误桥接回归：`test/t4_state.cc`、`test/t5_io.cc`、`test/t6_custom.cc`、`test/t7_builder.cc`、`test/t8_proto.cc`、`test/t9_bridge.cc`
 
 ## 当前 API 边界
 
 以下内容在头文件中可以确认：
 
-- `SslSocket.h` 是稳定的协程入口；`galay-ssl/async/Awaitable.h` 只是其传递包含的内部支撑头
+- `ssl_socket.h` 是稳定的协程入口；`galay-ssl/async/awaitable.h` 只是其传递包含的内部支撑头
 - 有 ALPN API：`SslContext::setALPNProtocols()`、`SslEngine::getALPNProtocol()`、`SslSocket::getALPNProtocol()`
 - 有 Session API：`setSessionCacheMode()`、`setSessionTimeout()`、`setSession()`、`getSession()`、`isSessionReused()`
 - 有 CA 文件、CA 路径与系统默认 CA API：`loadCACertificate()`、`loadCAPath()`、`useDefaultCA()`

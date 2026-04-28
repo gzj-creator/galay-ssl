@@ -33,18 +33,18 @@ check_benchmarks() {
 
     local missing=0
 
-    if [ ! -f "$BIN_DIR/B1-SslBenchServer" ]; then
-        echo "MISSING: B1-SslBenchServer"
+    if [ ! -f "$BIN_DIR/b1_server" ]; then
+        echo "MISSING: b1_server"
         missing=1
     else
-        echo "OK: B1-SslBenchServer"
+        echo "OK: b1_server"
     fi
 
-    if [ ! -f "$BIN_DIR/B1-SslBenchClient" ]; then
-        echo "MISSING: B1-SslBenchClient"
+    if [ ! -f "$BIN_DIR/b1_client" ]; then
+        echo "MISSING: b1_client"
         missing=1
     else
-        echo "OK: B1-SslBenchClient"
+        echo "OK: b1_client"
     fi
 
     if [ $missing -eq 1 ]; then

@@ -47,7 +47,7 @@ ensure_release_lto() {
 
 start_server() {
     echo "Starting SSL server on port $SERVER_PORT..."
-    "$BIN_DIR/B1-SslBenchServer" $SERVER_PORT "$BIN_DIR/certs/server.crt" "$BIN_DIR/certs/server.key" > /tmp/ssl_server.log 2>&1 &
+    "$BIN_DIR/b1_server" $SERVER_PORT "$BIN_DIR/certs/server.crt" "$BIN_DIR/certs/server.key" > /tmp/ssl_server.log 2>&1 &
     SERVER_PID=$!
     sleep 1
 
@@ -69,7 +69,7 @@ run_test() {
     echo "Connections: $connections, Requests/conn: $requests"
 
     local output
-    output=$("$BIN_DIR/B1-SslBenchClient" 127.0.0.1 $SERVER_PORT $connections $requests 2>&1)
+    output=$("$BIN_DIR/b1_client" 127.0.0.1 $SERVER_PORT $connections $requests 2>&1)
 
     local total_requests=$(echo "$output" | grep "Total requests:" | awk '{print $3}')
     local total_errors=$(echo "$output" | grep "Total errors:" | awk '{print $3}')
@@ -100,7 +100,7 @@ main() {
 
     ensure_release_lto
 
-    if [ ! -f "$BIN_DIR/B1-SslBenchServer" ] || [ ! -f "$BIN_DIR/B1-SslBenchClient" ]; then
+    if [ ! -f "$BIN_DIR/b1_server" ] || [ ! -f "$BIN_DIR/b1_client" ]; then
         echo "ERROR: Binaries not found. Please build first."
         exit 1
     fi

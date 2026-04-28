@@ -48,7 +48,7 @@
 | 编译器 | C++23 | 仓库代码使用 `std::expected` 与协程 |
 | CMake | `>= 3.16` | 默认源码构建（库 / tests / benchmarks / include 示例） |
 | OpenSSL | 开发包可发现 | `find_package(OpenSSL REQUIRED)` |
-| `galay-kernel` | 必需 | `find_package(galay-kernel 3.4.4 REQUIRED CONFIG)` |
+| `galay-kernel` | 必需 | `find_package(galay-kernel 4.0.0 REQUIRED CONFIG)` |
 | `liburing` | Linux 可选 | 缺失时自动回退 `epoll` |
 | Modules | CMake `>= 3.28` + 支持模块扫描的生成器/编译器 | 仅影响 `galay-ssl-modules` 与 import 示例 |
 
@@ -95,8 +95,8 @@ target_link_libraries(your_app PRIVATE galay-ssl::galay-ssl)
 最小 include 示例：
 
 ```cpp
-#include <galay-ssl/ssl/SslContext.h>
-#include <galay-ssl/async/SslSocket.h>
+#include <galay-ssl/ssl/ssl_context.h>
+#include <galay-ssl/async/ssl_socket.h>
 
 int main() {
     galay::ssl::SslContext ctx(galay::ssl::SslMethod::TLS_Client);
@@ -106,7 +106,7 @@ int main() {
 
 消费链路说明：
 
-- `galay-ssl-config.cmake` 会自动 `find_dependency(OpenSSL REQUIRED)` 与 `find_dependency(galay-kernel 3.4.4 REQUIRED CONFIG)`
+- `galay-ssl-config.cmake` 会自动 `find_dependency(OpenSSL REQUIRED)` 与 `find_dependency(galay-kernel 4.0.0 REQUIRED CONFIG)`
 - 本次文档修复期间已重新验证 `cmake --install` + `find_package(galay-ssl REQUIRED)` + 上述 include 写法可以真实编译通过
 - 已安装包当前只导出 `galay-ssl::galay-ssl`；没有导出 `galay-ssl::galay-ssl-modules`
 
@@ -116,15 +116,15 @@ int main() {
 
 | 类型 | 源文件 | Target | 当前状态 |
 |------|--------|--------|----------|
-| include 示例 | `examples/include/E1-ssl_echo_server.cc` | `E1-SslEchoServer-Include` | 可构建，可运行 |
-| include 示例 | `examples/include/E2-ssl_client.cc` | `E2-SslClient-Include` | 可构建，可运行 |
-| import 示例 | `examples/import/E1-ssl_echo_server.cc` | `E1-SslEchoServer-Import` | 仅在模块工具链满足时生成 |
-| import 示例 | `examples/import/E2-ssl_client.cc` | `E2-SslClient-Import` | 仅在模块工具链满足时生成 |
-| 测试 | `test/T1-ssl_socket_test.cc` | `T1-SslSocketTest` | 脚本会运行 |
-| 测试 | `test/T2-ssl_loopback_smoke.cc` | `T2-SslLoopbackSmoke` | 脚本会运行 |
-| 测试 | `test/T3-ssl_single_shot_semantics.cc` | `T3-SslSingleShotSemantics` | 脚本会运行 |
-| benchmark | `benchmark/B1-ssl_bench_server.cc` | `B1-SslBenchServer` | 可构建，可运行 |
-| benchmark | `benchmark/B1-ssl_bench_client.cc` | `B1-SslBenchClient` | 可构建，可运行 |
+| include 示例 | `examples/include/e1_echo.cc` | `e1_echo_include` | 可构建，可运行 |
+| include 示例 | `examples/include/e2_echo.cc` | `e2_echo_include` | 可构建，可运行 |
+| import 示例 | `examples/import/e1_echo.cc` | `e1_echo_import` | 仅在模块工具链满足时生成 |
+| import 示例 | `examples/import/e2_echo.cc` | `e2_echo_import` | 仅在模块工具链满足时生成 |
+| 测试 | `test/t1_socket.cc` | `t1_socket` | 脚本会运行 |
+| 测试 | `test/t2_loopback.cc` | `t2_loopback` | 脚本会运行 |
+| 测试 | `test/t3_policy.cc` | `t3_policy` | 脚本会运行 |
+| benchmark | `benchmark/b1_server.cc` | `b1_server` | 可构建，可运行 |
+| benchmark | `benchmark/b1_client.cc` | `b1_client` | 可构建，可运行 |
 
 ## 直接运行命令
 
@@ -132,19 +132,19 @@ int main() {
 
 ```bash
 # include 示例
-./build/bin/E1-SslEchoServer-Include 8443 certs/server.crt certs/server.key
-./build/bin/E2-SslClient-Include 127.0.0.1 8443
-./build/bin/E2-SslClient-Include localhost 8443 certs/ca.crt
+./build/bin/e1_echo_include 8443 certs/server.crt certs/server.key
+./build/bin/e2_echo_include 127.0.0.1 8443
+./build/bin/e2_echo_include localhost 8443 certs/ca.crt
 
 # 测试
 ctest --test-dir build --output-on-failure
-./build/bin/T1-SslSocketTest
-./build/bin/T2-SslLoopbackSmoke
-./build/bin/T3-SslSingleShotSemantics
+./build/bin/t1_socket
+./build/bin/t2_loopback
+./build/bin/t3_policy
 
 # benchmark
-./build/bin/B1-SslBenchServer 8443 certs/server.crt certs/server.key
-./build/bin/B1-SslBenchClient 127.0.0.1 8443 200 500 47 4
+./build/bin/b1_server 8443 certs/server.crt certs/server.key
+./build/bin/b1_client 127.0.0.1 8443 200 500 47 4
 ```
 
 ## 仓库脚本的真实覆盖范围
@@ -160,7 +160,7 @@ ctest --test-dir build --output-on-failure
   - 可在命令后追加 CMake 参数，例如 `./scripts/run.sh build -G Ninja`
 - `./scripts/run.sh test`
   - 执行 `ctest --test-dir build --output-on-failure`
-  - 当前会覆盖 `T1-SslSocketTest` 到 `T9-SslSequenceBaseErrorBridge`
+  - 当前会覆盖 `t1_socket` 到 `t9_bridge`
 - `./scripts/run.sh bench`
   - 委托 `scripts/S1-Bench.sh`
   - 要求 `build/` 是 `Release + ENABLE_LTO=ON`
@@ -171,7 +171,7 @@ ctest --test-dir build --output-on-failure
   - Rust 对照源码位于 `benchmark/compare/rust/`
 - `./scripts/check.sh`
   - 重新执行 `ctest --test-dir build --output-on-failure`
-  - 检查 `B1-SslBenchServer`、`B1-SslBenchClient` 是否存在
+  - 检查 `b1_server`、`b1_client` 是否存在
   - 检查证书文件是否复制到 `build/bin/certs`
   - 不会执行真实吞吐/QPS benchmark
 
@@ -179,8 +179,8 @@ ctest --test-dir build --output-on-failure
 
 仓库包含模块接口文件：
 
-- `galay-ssl/module/galay.ssl.cppm`
-- `galay-ssl/module/ModulePrelude.hpp`
+- `galay-ssl/module/galay_ssl.cppm`
+- `galay-ssl/module/module_prelude.hpp`
 
 真实行为：
 

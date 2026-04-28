@@ -43,7 +43,7 @@ ensure_release_lto() {
 }
 
 ensure_cpp_bins() {
-    if [ ! -x "$BIN_DIR/B1-SslBenchServer" ] || [ ! -x "$BIN_DIR/B1-SslBenchClient" ]; then
+    if [ ! -x "$BIN_DIR/b1_server" ] || [ ! -x "$BIN_DIR/b1_client" ]; then
         echo "ERROR: C++ benchmark binaries are missing under $BIN_DIR."
         exit 1
     fi
@@ -73,7 +73,7 @@ cleanup() {
 
 start_cpp_server() {
     cleanup
-    "$BIN_DIR/B1-SslBenchServer" "$SERVER_PORT" "$PROJECT_DIR/certs/server.crt" "$PROJECT_DIR/certs/server.key" > /tmp/galay_ssl_cpp_server.log 2>&1 &
+    "$BIN_DIR/b1_server" "$SERVER_PORT" "$PROJECT_DIR/certs/server.crt" "$PROJECT_DIR/certs/server.key" > /tmp/galay_ssl_cpp_server.log 2>&1 &
     SERVER_PID=$!
     sleep 1
     if ! kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -102,7 +102,7 @@ extract_metric() {
 }
 
 run_cpp_client() {
-    "$BIN_DIR/B1-SslBenchClient" 127.0.0.1 "$SERVER_PORT" "$CONNECTIONS" "$REQUESTS_PER_CONN" "$PAYLOAD_BYTES" "$THREADS" "$CONNECT_RETRIES"
+    "$BIN_DIR/b1_client" 127.0.0.1 "$SERVER_PORT" "$CONNECTIONS" "$REQUESTS_PER_CONN" "$PAYLOAD_BYTES" "$THREADS" "$CONNECT_RETRIES"
 }
 
 run_rust_client() {
