@@ -1,9 +1,0 @@
-[package]
-name = "galay-ssl-rust-bench"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-tokio = { version = "1.43", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync", "signal"] }
-tokio-rustls = "0.26"
-rustls-pemfile = "2.2"

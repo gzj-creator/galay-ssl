@@ -6,3 +6,4 @@ build-*/
 .crosslang-bench-results/
 test_results/
 benchmark/compare/rust/target/
+benchmark/compare/

@@ -11,3 +11,11 @@
   - 将源码、头文件、测试、示例与 benchmark 文件统一重命名为 lower_snake_case，编号前缀同步改为小写下划线形式。
   - 同步更新 CMake/Bazel 构建描述、模块入口、README/docs、脚本和所有项目内 include 路径引用。
   - 移除项目内相对 include，统一使用基于公开 include 根或模块根的非相对路径。
+
+## v2.0.1 - 2026-05-11
+
+- 版本级别：小版本（patch）
+- Git 提交消息：`chore: 移除 benchmark compare 目录`
+- Git Tag：`v2.0.1`
+- 自述摘要：
+  - 移除 `benchmark/compare` 目录并收紧忽略规则，避免误提交对比基准测试代码与构建产物。
